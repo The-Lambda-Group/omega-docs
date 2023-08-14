@@ -189,7 +189,7 @@ Omega objects all serialize into a final JSON form. This is the actual represent
            {"type": "reference-value",
             "id": "XXXXXXXXXXX",
             "revision": "YYYYYYYYY",
-            "value": {"type": "long"
+            "value": {"type": "long",
                       "value": 4}})
 
 (serialize (= 1 2)
@@ -199,6 +199,57 @@ Omega objects all serialize into a final JSON form. This is the actual represent
                         "arity": 2})
 ```
 
-# LeetCode Problems
+### Pulling and Pushing
 
-[LeetCode Problems](LeetCode.md)
+You can pull a datastore locally for more convenient manipulation before ultimately pushing to the upstream.
+
+```clj
+(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
+(datastore Local "/abc123")
+(Local/pull! Origin)
+(Local/insert! _ 4)
+(Local/insert! _ 5)
+(Local/push! Origin)
+```
+
+This code pulls a copy of `https://subdomain.domain.com/path/to/host/ds/abc123` locally, writes two objects, then pushes up the changes in batch.
+
+### Stream Pulling
+
+An alternative to a single pull or even a push are streams. Adding a stream into a datastore will constantly insert new records as they come into the stream.
+
+```clj
+(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
+(datastore Local "/abc123")
+(Local/stream Upstream)
+(Origin/stream Downstream)
+(Local/insert! Upstream)
+(Origin/insert! Downstream)
+```
+
+In this example, any changes to the remote or the origin will automatically be reflected in eachother.
+
+## Atomic Transactions
+
+Transactions that should be atomic can use the atomic keyword to be added all together or not at all.
+
+
+## Docker Client
+
+### Host
+
+You can run an Omega host locally with.
+
+```
+docker run -p 6422:6422 omegadb/omega host
+```
+
+You can connect to an Omega host with a remote console using.
+
+```
+docker run -p 6422:6422 omegadb/omega client
+```
+
+# See Also
+
+- [LeetCode Problems](LeetCode.md)
