@@ -21,39 +21,37 @@ Here are the clues:
 - The man who smokes blend has a neighbor who drinks water
 
 ```clj
-(assert!
- (:- (next List A B)
-     (nth List IndexA A)
-     (nth List IndexB B)
-     (or (+ IndexA 1 IndexB)
-         (+ IndexB 1 IndexA)))
+(:- (next List A B)
+    (nth List IndexA A)
+    (nth List IndexB B)
+    (or (+ IndexA 1 IndexB)
+        (+ IndexB 1 IndexA)))
 
- (length Houses 5)
- (contains Houses ["brit", _, _, _, "red"])
- (contains Houses ["swede", "dogs", _, _, _])
- (contains Houses ["dane", _, _, "tea", _])
- (next Houses [_, _, _, _, "green"] [_, _, _, _, "white"])
- (contains Houses [_, _, _, "coffee", "green"])
- (contains Houses ["birds", _, "pallmall", _, _])
- (contains Houses [_, _, "dunhill", _, "yellow"])
- (nth Houses 2 [_, _, _, "milk", _])
- (nth Houses 0 ["norwegian", _, _, _, _])
- (next Houses
-       [_, _, "blends", _, _]
-       ["cats", _, _, _, _])
- (next Houses
-       ["horses", _, _, _, _]
-       [_, _, "dunhill", _, _])
- (contains Houses [_, _, "bluemaster", "beer", _])
- (contains Houses ["german", _, "prince", _, _])
- (next Houses
-       ["norwegian", _, _, _, _]
-       [_, _, _, _, "blue"])
- (next Houses
-       [_, _, "blend", _, _]
-       [_, _, _, "water", _]))
-
-(contains Houses Result)
-(= Result ["fish", _, _, _, _])
-(return Result)
+(:- (einstein Result)
+    (length Houses 5)
+    (contains Houses ["brit", _, _, _, "red"])
+    (contains Houses ["swede", "dogs", _, _, _])
+    (contains Houses ["dane", _, _, "tea", _])
+    (next Houses [_, _, _, _, "green"] [_, _, _, _, "white"])
+    (contains Houses [_, _, _, "coffee", "green"])
+    (contains Houses ["birds", _, "pallmall", _, _])
+    (contains Houses [_, _, "dunhill", _, "yellow"])
+    (nth Houses 2 [_, _, _, "milk", _])
+    (nth Houses 0 ["norwegian", _, _, _, _])
+    (next Houses
+          [_, _, "blends", _, _]
+          ["cats", _, _, _, _])
+    (next Houses
+          ["horses", _, _, _, _]
+          [_, _, "dunhill", _, _])
+    (contains Houses [_, _, "bluemaster", "beer", _])
+    (contains Houses ["german", _, "prince", _, _])
+    (next Houses
+          ["norwegian", _, _, _, _]
+          [_, _, _, _, "blue"])
+    (next Houses
+          [_, _, "blend", _, _]
+          [_, _, _, "water", _])
+    (contains Houses Result)
+    (= Result ["fish", _, _, _, _]))
 ```
