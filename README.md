@@ -62,7 +62,7 @@ Omega can process logic using the logical connectives `and`, `or`, `not`, `every
 
 ### Rules
 
-Rules can be asserted into the runtime with the `(assert! ...Rules)` functor. Anything passed into this functor will be asserted as a true fact into the current context of the query. In this query, the rule `(:- (mortal X) (man X))` should be read as *if X is a man, then X is mortal*. After the rules and facts have been asserted into the query, the term `(mortal Socrates)` will then be evaluated as true in that query.
+Rules can be asserted into the runtime with the `(assert! ...Rules)` form. Anything passed into this functor will be asserted as a true fact into the current context of the query. In this query, the rule `(:- (mortal X) (man X))` should be read as *if X is a man, then X is mortal*. After the rules and facts have been asserted into the query, the term `(mortal Socrates)` will then be evaluated as true in that query.
 
 ```clj
 (assert! 
@@ -143,29 +143,31 @@ The `(datastore Symbol Url)` functor binds a symbol to the datastore at a given 
 (datastore AlbumsDS
            "https://subdomain.domain.com/path/to/host/ds/albums")
 
+(contains ["The Eagles", "Led Zeppelin"] Artist)
+
 (AlbumsDS/query 
- (destruct Album {"artist-name": "The Eagles"}))
+ (destruct Album {"artist-name": Artist}))
 
 (merge Album
        {"artist-is-hall-of-fame": true}
        Revision)
 
-(AlbumsDS/revise! _ Album Revision)
+(AlbumsDS/revise! Album Revision _)
 
 (AlbumsDS/insert!
- _
  {"artist-name": "The Beatles",
   "year": 1969,
   "artist-is-hall-of-fame": true,
-  "album-name": "Abbey Road"})
+  "album-name": "Abbey Road"}
+ _)
 
 (destruct Album
           {"year" 2005})
 
-(AlbumsDS/delete! _ Album)
+(AlbumsDS/delete! Album _)
 ```
 
-Once a symbol is bound by a datastore, facts and rules in that datastore may be accessed as a path on that symbol such as `AlbumsDS/insert!`. Datastores all implement the functors `(insert! Binding Value)`, `(revise! NewBinding OldBinding Revision)`, `(query ...Terms)`, and `(delete! NewBinding OldBinding)`. Together these make up how datastores are viewed, and edited.
+Once a symbol is bound by a datastore, facts and rules in that datastore may be accessed as a path on that symbol such as `AlbumsDS/insert!`. Datastores all implement the functors `(insert! Value NewBinding)`, `(revise! OldBinding Revision NewBinding)`, `(query ...Terms)`, and `(delete! OldBinding NewBinding)`. Together these make up how datastores are viewed, and edited.
 
 ### Serializing
 
@@ -196,7 +198,11 @@ Omega objects all serialize into a final JSON form. This is the actual represent
            {"type": "term",
             "functor": {"type": "functor",}
                         "name": "=",
-                        "arity": 2})
+                        "arity": 2},
+            "args": [{"type": "long",
+                      "value": 1},
+                     {"type": "long",
+                      "value": 2}])
 ```
 
 ### Pulling and Pushing
@@ -207,8 +213,8 @@ You can pull a datastore locally for more convenient manipulation before ultimat
 (datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
 (datastore Local "/abc123")
 (Local/pull! Origin)
-(Local/insert! _ 4)
-(Local/insert! _ 5)
+(Local/insert! 4 _)
+(Local/insert! 5 _)
 (Local/push! Origin)
 ```
 
@@ -223,16 +229,24 @@ An alternative to a single pull or even a push are streams. Adding a stream into
 (datastore Local "/abc123")
 (Local/stream Upstream)
 (Origin/stream Downstream)
-(Local/insert! Upstream)
-(Origin/insert! Downstream)
+(Origin/insert! Upstream _)
+(Local/insert! Downstream _)
 ```
 
 In this example, any changes to the remote or the origin will automatically be reflected in eachother.
 
 ## Atomic Transactions
 
-Transactions that should be atomic can use the atomic keyword to be added all together or not at all.
+Transactions that should be atomic can use the `atomic` symbol to be added all together or not at all.
 
+```clj
+(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
+(atomic
+ (Origin/insert! 4 A)
+ (Origin/revise! A 5 B)
+ (Origin/revise! A 6 C)
+ (Origin/revise! A 7 D))
+```
 
 ## Docker Client
 

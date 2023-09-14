@@ -26,9 +26,9 @@ Explanation: merged array = [1,2,3,4] and median is (2 + 3) / 2 = 2.5.
 
 - `nums1.length == m`
 - `nums2.length == n`
-- `<= m <= 1000`
-- `<= n <= 1000`
-- `<= m + n <= 2000`
+- `0 <= m <= 1000`
+- `0 <= n <= 1000`
+- `0 <= m + n <= 2000`
 - `106 <= nums1[i], nums2[i] <= 106`
 
 **Solution**
@@ -100,9 +100,8 @@ Explanation: ".*" means "zero or more (*) of any character (.)".
     (match-char Char Pattern Matched)
     (match-str Rest Matched NewPattern))
 
-(:- (regex-matches String Pattern Matches)
-    (passes (match-str String Pattern "")
-            Matches))
+(:- (regex-matches String Pattern)
+    (match-str String Pattern ""))
 ```
 
 ## 23. Merge k Sorted Lists
@@ -154,7 +153,8 @@ Output: []
 (:- (k-sorted-lists Lists Result)
     (nth Lists I List)
     (assert! (sort List List))
-    (fold Lists concat Merged)  
+    ;; (array-agg Lists Merged)
+    (reduce Lists concat Merged)  
     (sort Merged Result))
 ```
 
@@ -194,18 +194,18 @@ Output: [3,2,1,4,5]
 **Follow-up:** Can you solve the problem in O(1) extra memory space?
 
 ```clj
-;; (nth-partition [1 2 3 4 5] 2 0 [1 2])
-;; (nth-partition [1 2 3 4 5] 2 1 [3 4])
-;; (nth-partition [1 2 3 4 5] 2 2 [5])
+;; (chunk [1 2 3 4 5] 2 0 [1 2])
+;; (chunk [1 2 3 4 5] 2 1 [3 4])
+;; (chunk [1 2 3 4 5] 2 2 [5])
 ;; (reverse [1 2] [2 1])
 (:- (reverse-nodes-in-k-group List K Reversed)
     (length List Length)
     (length Reversed Length)
-    (nth-partition List K I Partition)
+    (chunk List K I Partition)
     (if (length Partition K)
       (reverse Partition ReverseNode)
       (= Partition ReverseNode))
-    (nth-partition ReverseNode I Reversed))
+    (chunk ReverseNode I Reversed))
 ```
 
 ## 30. Substring with Concatenation of All Words
@@ -459,11 +459,114 @@ Output: 9
 ```clj
 (:- (all-water-held Heights WaterHeld)
     (nth Heights I _)
-    (take LeftHeights I WithoutLeft)
+    (take Height I LeftHeights WithoutLeft)
     (cons Height RightHeights WithoutLeft)
     (list-max LeftHeights MaxLeft)
     (list-max RightHeights MaxRight)
     (min MaxLeft MaxRight WaterHeight)
     (- WaterHeight Height WaterHeldAtHeight)
     (sum WaterHeldAtHeight WaterHeld))
+```
+
+**44. Wildcard Matching**
+
+Given an input string (`s`) and a pattern (`p`), implement wildcard pattern matching with support for `'?'` and `'*'` where:
+
+- `'?'` Matches any single character.
+- `'*'` Matches any sequence of characters (including the empty sequence).
+
+The matching should cover the entire input string (not partial).
+ 
+**Example 1:**
+```
+Input: s = "aa", p = "a"
+Output: false
+Explanation: "a" does not match the entire string "aa".
+```
+
+**Example 2:**
+```
+Input: s = "aa", p = "*"
+Output: true
+Explanation: '*' matches any sequence.
+```
+
+**Example 3:**
+
+```
+Input: s = "cb", p = "?a"
+Output: false
+Explanation: '?' matches 'c', but the second letter is 'a', which does not match 'b'.
+```
+
+**Constraints:**
+- `0 <= s.length, p.length <= 2000`
+- `s` contains only lowercase English letters.
+- `p` contains only lowercase English letters, `'?'` or `'*'`.
+
+**Solution:**
+```clj
+(:- (wildcard-match String Pattern)
+    (or (and (= String "")
+             (contains ["" "*"] Pattern))
+        (and (cons PatternChar PatternRest Pattern)
+             (cons StringChar StringRest String)
+             (contains ["?" StringChar] MatchChar)
+             (match PatternChar
+               MatchChar (wildcard-match StringRest PatternRest)
+               "*" (or (wildcard-match StringRest PatternRest)
+                       (wildcard-match StringRest Pattern))))))
+```
+
+**51. N-Queens**
+
+The n-queens puzzle is the problem of placing `n` queens on an `n x n` chessboard such that no two queens attack each other.
+
+Given an integer `n`, return all distinct solutions to the n-queens puzzle. You may return the answer in any order.
+
+Each solution contains a distinct board configuration of the n-queens' placement, where `'Q'` and `'.'` both indicate a queen and an empty space, respectively.
+ 
+**Example 1:**
+
+<img src="https://assets.leetcode.com/uploads/2020/11/13/queens.jpg"/>
+
+Input: `n = 4`
+
+Output: `[[".Q..","...Q","Q...","..Q."],["..Q.","Q...","...Q",".Q.."]]`
+
+Explanation: There exist two distinct solutions to the 4-queens puzzle as shown above
+
+**Example 2:**
+
+Input: `n = 1`
+
+Output: `[["Q"]]`
+
+**Constraints:**
+- `1 <= n <= 9`
+
+**Solution:**
+```clj
+(:- (count-queens Collection Count) 
+    (nth Collection Index Element)
+    (group-by Collection
+              (= Element true) 
+              (count Index Count)))
+
+(:- (n-queens N Board)
+    (Matrix/size Board N N)
+    (Matrix/nth Board ElementIndex Element)
+    (contains [true, false] Element)
+    (Matrix/row Board RowIndex Row)
+    (Matrix/column Board ColumnIndex Column) 
+    (Matrix/diagonal Board DiagonalIndex Diagonal)
+    (contains [0, 1] ValidQueenAmount)
+    (forall RowIndex
+            (count-queens Row ValidQueenAmount))
+    (forall ColumnIndex
+            (count-queens Column ValidQueenAmount))
+    (forall DiagonalIndex
+            (count-queens Diagonal ValidQueenAmount))
+    (nth AllElements ElementIndex Element)
+    (count-queens AllElements N))
 ```
