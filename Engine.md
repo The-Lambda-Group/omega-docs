@@ -1,5 +1,61 @@
 # Omega Query Engine
 
+## Evaluation Model
+```clj
+(assert!
+ (balance "BTC" "John" 1 1)
+ (balance "BTC" "John" 2 2)
+ (balance "BTC" "John" 3 1)
+ (balance "BTC" "Dave" 4 3)
+ (balance "BTC" "Dave" 1000 5))
+
+(:- (current-balance Token Block Holder Balance) 
+    (balance Token Holder BalanceBlock _)
+    (<= BalanceBlock Block)
+    (with-group-by Holder
+      (max BalanceBlock CurrentBlock)) 
+    (balance Token Holder CurrentBlock Balance))
+
+(eval (and (current-balance "BTC" 100 Holder Balance)
+           (return [Holder Balance]))
+      (and {Block 100
+            Token "BTC"}
+           (symbol-table [Holder BalanceBlock]
+                         ["John" 1]
+                         ["John" 2]
+                         ["John" 3]
+                         ["Dave" 4])
+           (or {Holder "John"
+                CurrentBlock 3}
+               {Holder "Dave"
+                CurrentBlock 4})
+           (or {Holder "John"
+                CurrentBlock 3
+                Balance 1}
+               {Holder "Dave"
+                CurrentBlock 4
+                Balance 5})
+           (= Return [["John" 1]
+                      ["Dave" 5]])))
+
+(:- (max-holder Token Block Holder MaxBalance)
+    (current-balance Token Block AnyHolder CurrentBalance)
+    (with-group-by Token
+      (max CurrentBalance MaxBalance))
+    (current-balance Token Block Holder MaxBalance))
+
+(eval (and (max-holder "BTC" 100 Holder Balance)
+           (return [Holder Balance]))
+      (and {Block 100
+            Token "BTC"}
+           (symbol-table [AnyHolder CurrentBalance]
+                         [["John" 1]
+                          ["Dave" 5]])
+           {MaxBalance 5}
+           {Holder "Dave"}
+           (= Return [["Dave" 5]])))
+```
+
 ## Predicate Refactoring
 
 The predicate refactoring engine in omega leverages boolean algebra laws to refactor query expressions into more optimal queries in three phases. Predicate Expansion, Predicate Compaction, then Predicate Reordering.
