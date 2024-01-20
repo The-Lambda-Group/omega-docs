@@ -32,7 +32,7 @@ Terms may either be true or false, for instance `(even 2)` we, would expect to b
 
 ### Logical Connectives
 
-Omega can process logic using the logical connectives `and`, `or`, `not`, `every`, and `exists`.
+Omega describes relationships between statements using using the logical connectives `and`, `or`, `not`, `every`, and `exists`.
 
 ```clj
 (and (= 1 X)
@@ -62,7 +62,7 @@ Omega can process logic using the logical connectives `and`, `or`, `not`, `every
 
 ### Rules
 
-Rules can be asserted into the runtime with the `(assert! ...Rules)` form. Anything passed into this functor will be asserted as a true fact into the current context of the query. In this query, the rule `(:- (mortal X) (man X))` should be read as *if X is a man, then X is mortal*. After the rules and facts have been asserted into the query, the term `(mortal Socrates)` will then be evaluated as true in that query.
+Rules can be asserted into the runtime with the `(assert! ...Rules)` form. Anything in this form will be asserted as a true fact into the current context of the query. In this query, the rule `(:- (mortal X) (man X))` should be read as *if X is a man, then X is mortal*. After the rules and facts have been asserted into the query, the term `(mortal Socrates)` will then be evaluated as true in that query.
 
 ```clj
 (assert! 
@@ -121,53 +121,41 @@ curl \
 }
 ```
 
-All data will return serialized OQL data. As an OQL query, this would be:
-
-```clj
-(datastore AlbumsDS
-           "https://subdomain.domain.com/path/to/host/ds/albums")
-
-(AlbumsDS/query
- (functor Functor Name Arity))
-
-(contains Functors Functor)
-
-(return Functors)
-```
-
 ### Viewing / Editing Datastores
 
 The `(datastore Symbol Url)` functor binds a symbol to the datastore at a given URL.  
 
 ```clj
-(datastore AlbumsDS
-           "https://subdomain.domain.com/path/to/host/ds/albums")
+(datastore AlbumsDS "https://subdomain.domain.com/path/to/host/ds/albums")
 
 (contains ["The Eagles", "Led Zeppelin"] Artist)
 
-(AlbumsDS/query 
- (destruct Album {"artist-name": Artist}))
+(= AlbumTerm (AlbumsDS/album Album))
+
+(destruct Album {"artist-name": Artist})
 
 (merge Album
        {"artist-is-hall-of-fame": true}
-       Revision)
+       NewAlbum)
 
-(AlbumsDS/revise! Album Revision _)
+(assign-args AlbumTerm [NewAlbum] NewAlbumTerm)
+
+(AlbumsDS/insert! NewAlbumTerm _)
 
 (AlbumsDS/insert!
- {"artist-name": "The Beatles",
-  "year": 1969,
-  "artist-is-hall-of-fame": true,
-  "album-name": "Abbey Road"}
- _)
+ (album {"artist-name": "The Beatles",
+         "year": 1969,
+         "artist-is-hall-of-fame": true,
+         "album-name": "Abbey Road"}
+        _))
 
 (destruct Album
-          {"year" 2005})
+          {"year": 2005})
 
-(AlbumsDS/delete! Album _)
+(AlbumsDS/delete! Album)
 ```
 
-Once a symbol is bound by a datastore, facts and rules in that datastore may be accessed as a path on that symbol such as `AlbumsDS/insert!`. Datastores all implement the functors `(insert! Value NewBinding)`, `(revise! OldBinding Revision NewBinding)`, `(query ...Terms)`, and `(delete! OldBinding NewBinding)`. Together these make up how datastores are viewed, and edited.
+Once a symbol is bound by a datastore, facts and rules in that datastore may be accessed as a path on that symbol such as `AlbumsDS/insert!`. Datastores all implement the functors `(insert! OldBinding NewBinding)` and `(delete! Binding)`. Together these make up how datastores are viewed, and edited.
 
 ### Serializing
 
@@ -205,49 +193,6 @@ Omega objects all serialize into a final JSON form. This is the actual represent
                       "value": 2}])
 ```
 
-### Pulling and Pushing
-
-You can pull a datastore locally for more convenient manipulation before ultimately pushing to the upstream.
-
-```clj
-(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
-(datastore Local "/abc123")
-(Local/pull! Origin)
-(Local/insert! 4 _)
-(Local/insert! 5 _)
-(Local/push! Origin)
-```
-
-This code pulls a copy of `https://subdomain.domain.com/path/to/host/ds/abc123` locally, writes two objects, then pushes up the changes in batch.
-
-### Stream Pulling
-
-An alternative to a single pull or even a push are streams. Adding a stream into a datastore will constantly insert new records as they come into the stream.
-
-```clj
-(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
-(datastore Local "/abc123")
-(Local/stream Upstream)
-(Origin/stream Downstream)
-(Origin/insert! Upstream _)
-(Local/insert! Downstream _)
-```
-
-In this example, any changes to the remote or the origin will automatically be reflected in eachother.
-
-## Atomic Transactions
-
-Transactions that should be atomic can use the `atomic` symbol to be added all together or not at all.
-
-```clj
-(datastore Origin "https://subdomain.domain.com/path/to/host/ds/abc123")
-(atomic
- (Origin/insert! 4 A)
- (Origin/revise! A 5 B)
- (Origin/revise! A 6 C)
- (Origin/revise! A 7 D))
-```
-
 ## Docker Client
 
 ### Host
@@ -266,7 +211,7 @@ docker run -p 6422:6422 omegadb/omega client
 
 # See Also
 
-- [LeetCode Problems](LeetCode.md)
+- [LeetCode Problems](LeetCode.md) see some common leetcode problems translated into OQL
 - [Groups](Groups.md)
 - [Einstein's Riddle](Einstein.md)
 - [Refs](Refs.md)

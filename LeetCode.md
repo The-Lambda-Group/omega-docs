@@ -152,8 +152,7 @@ Output: []
 ```clj
 (:- (k-sorted-lists Lists Result)
     (nth Lists I List)
-    (assert! (sort List List))
-    ;; (array-agg Lists Merged)
+    (assert! (sorted List))
     (reduce Lists concat Merged)  
     (sort Merged Result))
 ```
