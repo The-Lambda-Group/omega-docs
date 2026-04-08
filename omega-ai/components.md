@@ -111,6 +111,8 @@ Components live in two places:
 
 The library is like the source code on GitHub. The install is like the running service on your server.
 
+To create a new component library, see the [omega-ai-components README](https://github.com/The-Lambda-Group/omega-ai-components#creating-a-new-component-library).
+
 ### Workspace Structure
 
 ```
@@ -192,3 +194,50 @@ Used at the bottom of every implementation file to register clauses:
 ```
 
 The map key is the method name, the nested key is the arity (as a string), and the value is the in-memory clause symbol.
+
+## Event Subscriptions
+
+Event subscriptions connect events to handler functions. They have three parts:
+
+| Part | Example | Description |
+|------|---------|-------------|
+| **Event type** | `omega/query-omega/apps/{AppId}/pages/{PageId}/event` | What events to listen for |
+| **Sub-location** | `omega/query-omega/apps/{AppId}/pages/{PageId}/event-handler-v2` | Where the subscription handler lives |
+| **Handler func** | functor pointing to a datastore with `handle-event` clauses | What code runs when an event fires |
+
+### How events flow
+
+```
+emit-event query
+    │ builds event type from page's AppId + PageId
+    │ calls (new-subscription-event EventType EventData Event)
+    │ calls (emit-event Event _)
+    ↓
+Subscription system
+    │ matches event type to registered subscriptions
+    │ calls the handler func with the event
+    ↓
+Handler clause (in handler datastore)
+    │ extracts page-id and args from event-data
+    │ calls run-page on the target page's on-event
+    ↓
+Target page (e.g. Coordinator)
+    │ processes the event, returns result
+    │ may emit continuation events for pagination
+```
+
+### Registering subscriptions
+
+Subscriptions are registered by the Service protocol's `start` method using `write-event-subscription`:
+
+```oql
+(write-event-subscription SubLocation EventType HandlerFunc)
+```
+
+The handler func is a functor pointing to a datastore where `handle-event` clauses are stored. This functor is created at push time and captured into the start clause.
+
+### Important
+
+- The event handler component is a **thin wrapper** — it dispatches to the target page and returns the result. It does not inspect return values, handle continuation, or re-emit events.
+- **Continuation is the caller's responsibility.** If a coordinator needs to paginate through batches, it emits its own continuation events via the `emit-event` query.
+- Each event type can have only one subscription. Registering a new subscription for the same sub-location overwrites the previous one.

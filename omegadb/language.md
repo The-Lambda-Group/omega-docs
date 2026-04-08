@@ -27,6 +27,41 @@ Capitalized names are **symbols** (variables). The engine tries to find values f
 
 This is **unification** — the engine doesn't assign variables top-down like imperative code. It finds consistent bindings across all terms.
 
+**Unification applies to every term, not just `=`.** When you write `(get Map "key" Value)`, the third argument is unified — if `Value` is an unbound symbol, it binds to whatever the key holds. If `Value` is a literal, the term only succeeds when the key's value matches that literal:
+
+```oql
+(= Data {"step" "score" "flag" "false"})
+
+;; Symbol in third position — binds Val to "false"
+(get Data "flag" Val)          ;; succeeds, Val = "false"
+
+;; Literal in third position — unifies, so this is a constraint
+(get Data "flag" "false")      ;; succeeds (value matches)
+(get Data "flag" "true")       ;; FAILS (value is "false", not "true")
+
+;; Key missing — term fails regardless
+(get Data "missing" Val)       ;; FAILS (key doesn't exist)
+```
+
+This matters for control flow. `(if Condition Then Else)` checks whether `Condition` **succeeds as a term**, not whether it returns a truthy value. So `(if (get Data "flag" "false") ...)` asks "does the key `flag` exist with value `"false"`?" — not "get flag with default false":
+
+```oql
+(= Data {"step" "score"})
+
+;; "flag" is missing — get fails — takes Else branch
+(if (get Data "flag" "false")
+  (= Result "then")
+  (= Result "else"))           ;; Result = "else"
+
+;; Now with flag present:
+(= Data2 {"step" "score" "flag" "false"})
+
+;; "flag" exists and value matches "false" — get succeeds — takes Then branch
+(if (get Data2 "flag" "false")
+  (= Result2 "then")           ;; Result2 = "then"
+  (= Result2 "else"))
+```
+
 ## Datastores
 
 Data in OQL lives in **datastores**. A datastore is a named location that holds terms (facts and rules). You declare a datastore and then use it as a namespace prefix:
@@ -113,9 +148,11 @@ You can define an in-memory clause inside another clause's body. It's scoped to 
     (= Result {"parsed" Parsed}))
 ```
 
-**Warning:** Inner clauses are highly experimental. There are known bugs with clause definitions inside clause bodies. Test thoroughly and expect edge cases.
+**Warning:** Inner clauses are highly experimental. Known limitations:
+- **Stored clause writes inside inner clauses don't persist.** A `(:- (Ds/term! ...))` defined inside another clause body will not write to CouchDB. The stored clause write only works at the top level of a query. If you need to define a stored clause dynamically, define it at the top level and use `capture` to pass it into the clause that needs it.
+- Inner in-memory clauses (no `!`) work for helper logic within a single query execution.
 
-### Closures (experimental)
+### Closures / Capture
 
 Clauses can capture symbols from the outer scope using the `capture` syntax:
 
@@ -125,7 +162,25 @@ Clauses can capture symbols from the outer scope using the `capture` syntax:
     (+ A SomeOuterVar Result))
 ```
 
-**Warning:** Closures are also highly experimental. There are several known bugs with capturing clauses inside clauses. Use with caution.
+This is the recommended workaround when you need a stored clause's result available inside an implementation clause. Define the stored clause at the top level (push time), create a functor for it, and capture the functor:
+
+```oql
+;; At push time — define the stored clause and create a functor
+(datastore HandlerDs "my/handler/datastore")
+
+(:- (HandlerDs/handle-event! Event Result)
+    ;; ... handler logic ...
+    (= Result {"status" "ok"}))
+
+(functor "handle-event" 2 HandlerDs HandleFunc)
+
+;; Implementation clause captures the functor from push time
+(:- (Install Exec Result {"capture" [HandleFunc]})
+    ;; HandleFunc is available here — pass it to write-event-subscription, etc.
+    (= Result {"handler" HandleFunc}))
+```
+
+**Warning:** Capture is experimental. There are known edge cases with capturing clauses inside other captured clauses. Keep capture usage flat — avoid nesting captured clauses.
 
 ## Functors
 
@@ -192,13 +247,16 @@ The index path is a unique identifier for the index. The array specifies which a
 
 ## Maps and Access
 
-OQL works natively with JSON-like maps:
+OQL works natively with JSON-like maps. Remember — every argument is unified, so `get` and `get-in` can both **read** (bind an unbound symbol) and **constrain** (match against a literal):
 
 ```oql
-;; Read a key
+;; Bind Name to whatever value is at "name"
 (get Page "name" Name)
 
-;; Read a nested key
+;; Constrain — only succeeds if name is "Score Agents"
+(get Page "name" "Score Agents")
+
+;; Nested access (same rules apply)
 (get-in Page ["page-data" "name"] Name)
 
 ;; Set a key (returns new map)
@@ -301,9 +359,10 @@ Common built-in operations:
 ```oql
 (= X 5)                              ;; unify X with 5
 (+ 1 2 Sum)                          ;; arithmetic
-(get Map "key" Value)                 ;; map access
-(get-in Map ["a" "b"] Value)          ;; nested access
-(set Map "key" NewVal Result)         ;; map update
+(get Map "key" Value)                 ;; map access (unifies Value with key's value)
+(get-in Map ["a" "b"] Value)          ;; nested access (unifies Value)
+(set Map "key" NewVal Result)         ;; map update (returns new map)
+(merge Map1 Map2 Result)             ;; merge two maps (Map2 wins on conflict)
 (string-split Path "/" Segments)      ;; string operations
 (uuid Id)                             ;; generate UUID
 (json-stringify Obj Str)              ;; JSON serialization
@@ -324,6 +383,16 @@ Common built-in operations:
 
 **Return values** must always be arrays:
 ```oql
+(return [Result])
+```
+
+**Bind before returning.** Map literals with symbols inside `return` will return unresolved symbolic values. Always bind to a variable first:
+```oql
+;; BAD — returns symbolic placeholders instead of values
+(return [{"status" Status "count" Count}])
+
+;; GOOD — bind first, then return
+(= Result {"status" Status "count" Count})
 (return [Result])
 ```
 

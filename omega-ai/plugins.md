@@ -101,3 +101,41 @@ Components should never use raw OQL built-in terms for system operations. Always
 | `emit-event` / `new-subscription-event` | `emit-event` query |
 | `write-event-subscription` | `Qo.Public.OqlApi.PageSub/write-page-subscription` |
 | `println-stream` | `print-stream` query |
+
+## Debugging
+
+### Reading logs directly
+
+`qo logs` can be slow on large log streams. For faster reads, query the log stream datastore directly with a mango query:
+
+```oql
+(datastore Logs "<log-stream-datastore-path>")
+
+(= Mango {"selector" {"_id" {"$exists" true}}
+           "sort" [{"args.0" "desc"}]
+           "limit" 10})
+(mango-query Logs Mango Object)
+(= Object [Time Msg])
+(json-stringify Msg MsgString)
+(string-split LogStr " " [Time MsgString])
+(with-order-by [Time]
+  (fold [] LogStr append FullLog))
+(= Result FullLog
+
+(return [Result])
+```
+
+The log stream datastore path for a page can be found in Fauxton under the log stream block.
+
+### Listing subscriptions
+
+To check what event subscriptions exist:
+
+```oql
+(datastore SubDs "system/subscriptions/event-subscriptions")
+(functor "event-subscription" 3 SubDs SubFunc)
+(call SubFunc SubLocation EventType HandlerFunc)
+
+(= Result {"sub-location" SubLocation "event-type" EventType})
+(return [Result])
+```
