@@ -22,7 +22,7 @@ The notebook application built on OmegaDB.
 
 ## Reference
 
-- [CLI Commands](reference/cli.md) — qo command reference
+- [CLI Commands](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/commands.md) — qo command reference
 - [Public API](reference/api.md) — OQL API clause signatures
 - [Protocols](reference/protocols.md) — protocol specs and IDs
 
