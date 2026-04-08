@@ -1,3 +1,5 @@
+[< Home](README.md)
+
 # What is Omega?
 
 Omega is a notebook-based application platform backed by a logic database.

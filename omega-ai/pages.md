@@ -1,3 +1,5 @@
+[< Home](../README.md) | [OmegaAI](../README.md#omegaai)
+
 # Pages
 
 Everything in Omega lives on a page. A page is a container that can hold code, data, configuration, and logs. Pages are organized into a tree — every page has a parent, and can have children.

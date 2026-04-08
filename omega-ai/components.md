@@ -1,3 +1,5 @@
+[< Home](../README.md) | [OmegaAI](../README.md#omegaai)
+
 # Components, Protocols, and Implementations
 
 Omega's code model has three parts: **components**, **protocols**, and **implementations**. Together they define what a page can do and how it does it.
@@ -108,3 +110,85 @@ Components live in two places:
 **Component Installs** — running instances. When you run a component's `install` method, it creates a page tree in your workspace with sub-pages, databases, event handlers, and config. Managed with `qo run`, `qo ls`, `qo logs`, `qo query`.
 
 The library is like the source code on GitHub. The install is like the running service on your server.
+
+### Workspace Structure
+
+```
+Workspace Root (folder)/
+  Component Libraries/              <- source code (qo pull / qo push)
+    My Library/
+      My Component/
+        {id}-implementation.oql     <- OQL source
+        {id}-my-component.component.json
+        page.json
+  Component Installs/               <- running instances (qo run / qo ls / qo logs)
+    My Plugin/
+      Event Listener/               <- event handler + log stream
+      Events/
+        Coordinator/
+        Score Agents/
+      Data/
+        My Table/                   <- database page
+      Queries/
+        emit-event/
+        print-stream/
+```
+
+## The App Is the Source of Truth
+
+OQL code and data live in the database, not on disk. Files on disk (`impl/`) are a local mirror — a convenience for editing. Git history is a recovery safety net, not a deployment mechanism.
+
+```
+Disk (impl/)  ──push──▶  OmegaDB  ◀──run──  qo run / UI
+                  ◀──pull──
+```
+
+- **Pull** syncs from the app to disk
+- **Push** syncs from disk to the app — code is evaluated on write
+- **Run** invokes a page's implementation through its protocol
+
+Always `qo pull` before editing to get the latest. If the app and disk diverge, the app wins.
+
+## The Exec Object
+
+When a clause is invoked via `run-page` at runtime, it receives an `Exec` object containing the method metadata and caller's arguments:
+
+```oql
+(:- (OnEvent Exec Result)
+    ;; The page this implementation is running on
+    (get-in Exec ["method" "page-id"] PageId)
+
+    ;; The implementation being executed
+    (get-in Exec ["method" "implementation-id"] ImplId)
+
+    ;; The method name and arity
+    (get-in Exec ["method" "method-name"] MethodName)
+    (get-in Exec ["method" "method-arity"] Arity)
+
+    ;; The arguments passed by the caller
+    (get Exec "args" Args)
+    (get Args 0 Data))
+```
+
+The `page-id` in `Exec` is how implementations discover their context — they walk the page tree from their own page to find sibling pages, parent config, and data tables.
+
+## $$ARG$$
+
+Available at **push time** only (when `qo push` evaluates the file). Contains the implementation metadata:
+
+```oql
+(get $$ARG$$ "implementation-id" ImplId)  ;; the implementation being pushed
+(get $$ARG$$ "app-id" AppId)              ;; the app it belongs to
+(get $$ARG$$ "component-id" CompId)       ;; the component it implements
+(get $$ARG$$ "protocol-id" ProtoId)       ;; the protocol it fulfills
+```
+
+Used at the bottom of every implementation file to register clauses:
+
+```oql
+(= Clauses {"on-event" {"2" OnEvent}})
+(get $$ARG$$ "implementation-id" ImplId)
+(Qo.Public.OqlApi.Impl/set-implementation-clauses ImplId Clauses Result)
+```
+
+The map key is the method name, the nested key is the arity (as a string), and the value is the in-memory clause symbol.

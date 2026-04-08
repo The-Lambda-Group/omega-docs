@@ -1,34 +1,32 @@
 # Omega Documentation
 
-Documentation for the [Omega](https://github.com/The-Lambda-Group) platform — a notebook-based application platform backed by a logic database.
-
-## Getting Started
+Documentation for the [Omega](https://github.com/The-Lambda-Group) platform.
 
 - [What is Omega?](intro.md)
 
-## Concepts
+## OmegaDB
 
-- [Pages](concepts/pages.md) — pages, blocks, page tree
-- [Components, Protocols, and Implementations](concepts/components.md) — the code model
-- [OQL](concepts/oql.md) — Omega Query Language basics
-- [Lexical Scope](concepts/lexical-scope.md) — how scoping works in OQL (critical for writing implementations)
+The logic database engine and query language.
 
-## Plugins
+- [OQL Language](omegadb/language.md) — terms, clauses, datastores, control flow
+- [Execution Model](omegadb/execution-model.md) — solution sets, clause boundaries, performance
+- [Lexical Scope](omegadb/lexical-scope.md) — how scoping works in clause bodies
 
-- [Overview](plugins/overview.md) — what plugins are, lifecycle, actor model
+## OmegaAI
 
-## Guides
+The notebook application built on OmegaDB.
 
-- Getting Started *(coming soon)*
-- Building a Plugin *(coming soon)*
+- [Pages](omega-ai/pages.md) — pages, blocks, page tree
+- [Components](omega-ai/components.md) — components, protocols, implementations, push/run
+- [Plugins](omega-ai/plugins.md) — plugin lifecycle, actor model, service protocol
 
 ## Reference
 
-- [CLI Commands](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/commands.md)
-- [Public OQL API](https://github.com/The-Lambda-Group/query-omega-api#api-namespaces)
-- [OQL Conventions](https://github.com/The-Lambda-Group/query-omega-api#oql-conventions)
+- [CLI Commands](reference/cli.md) — qo command reference
+- [Public API](reference/api.md) — OQL API clause signatures
+- [Protocols](reference/protocols.md) — protocol specs and IDs
 
-## Architecture
+## Learn
 
-- [Workspace Structure](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/workspace-structure.md)
-- [Design Patterns](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/design-patterns.md)
+- Getting Started *(coming soon)*
+- Building a Plugin *(coming soon)*

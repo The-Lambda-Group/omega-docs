@@ -1,3 +1,5 @@
+[< Home](../README.md) | [OmegaDB](../README.md#omegadb)
+
 # Lexical Scope in OQL
 
 Understanding how scope works in OQL is critical for writing correct implementations. OQL has different scoping rules than most languages, and getting them wrong produces subtle bugs where clauses appear to work but silently use stale or wrong values.
@@ -20,48 +22,59 @@ An implementation file has two execution contexts:
     (= Result MyConfig))   ;; WRONG — MyConfig is unbound
 ```
 
-## Symbol Renaming (gen-local-symbols)
+## What Survives Into a Clause Body
 
-When a clause is stored, all symbols in the body that are NOT in the head get renamed via `gen-local-symbols`. This is how OQL prevents variable name collisions between different clauses.
+When a clause is stored or invoked, only two things make it into the clause body's solution space:
 
-**Head symbols** survive renaming — they're the interface:
+1. **Head symbols** — the arguments declared in the clause head. These are the interface.
+2. **Namespaced datastore references** — symbols used with namespace syntax (e.g., `Qo.Page/page-object`). The datastore reference is preserved because it's in namespace position.
+
+**Everything else is renamed.** All other symbols in the body get replaced with gensyms (e.g., `G__12345`) via `gen-local-symbols`. This prevents variable name collisions between different clauses.
+
 ```oql
 (:- (MyClause Arg1 Arg2 Result)
-    ;; Arg1, Arg2, Result keep their names (they're in the head)
-    ;; InternalVar gets renamed to a gensym (e.g., G__12345)
-    (get Arg1 "key" InternalVar)
+    ;; Arg1, Arg2, Result — SURVIVE (head symbols)
+    ;; Qo.Page — SURVIVES (namespace reference in Qo.Page/page-object)
+    ;; InternalVar — RENAMED to G__12345
+    ;; Page — RENAMED to G__12346
+    (Qo.Page/page-object _ _ Arg1 Page)
+    (get Page "name" InternalVar)
     (= Result InternalVar))
 ```
 
-**Namespaced symbols** survive in namespace position only:
+**Namespaced symbols only survive in namespace position**, not as values:
 ```oql
 (:- (MyClause Exec Result)
-    ;; Qo.Public.OqlApi.Page survives as a namespace prefix
-    (Qo.Public.OqlApi.Page/page-by-id PageId Page)
+    ;; Qo.Page survives here — it's in namespace position
+    (Qo.Page/page-object _ _ PageId Page)
     
-    ;; But if you try to use a datastore symbol as a VALUE, it gets renamed
-    (some-term Qo.Public.OqlApi.Page Result))  ;; WRONG — symbol gets renamed
+    ;; Qo.Page gets RENAMED here — it's used as a value argument
+    (some-term Qo.Page Result))  ;; WRONG — Qo.Page is renamed to a gensym
 ```
 
-## Datastores Must Be Redeclared Inside Clauses
+## Datastores in Clause Bodies
 
-Top-level `(datastore ...)` declarations don't survive into stored clause bodies. The datastore symbol gets renamed by gen-local-symbols, breaking the reference.
+Since namespaced references survive in namespace position, datastores declared at the top level *do* work inside clause bodies — **but only when used with namespace syntax**:
 
 ```oql
-;; Top-level datastore — available at push time
-(datastore MyDs "my/datastore/path")
+(datastore Qo.Page "omega/query-omega/page")
 
-;; WRONG — MyDs is renamed inside the clause body
-(:- (MyClause Exec Result)
-    (MyDs/some-term "hello" Result))   ;; MyDs is now G__12345, not a datastore
-
-;; CORRECT — redeclare inside the clause body
-(:- (MyClause Exec Result)
-    (datastore MyDs "my/datastore/path")
-    (MyDs/some-term "hello" Result))
+;; This WORKS — Qo.Page is used in namespace position
+(:- (MyClause PageId Result)
+    (Qo.Page/page-object _ _ PageId Result))
 ```
 
-This is why you see datastore declarations repeated inside clause bodies throughout the codebase — it's required, not redundant.
+However, if you need to use a datastore symbol as a value (not in namespace position), or if you're building a datastore path dynamically, you must redeclare it inside the clause body:
+
+```oql
+;; CORRECT — dynamic datastore path built inside clause
+(:- (MyClause AppId LogStreamId Result)
+    (string-split LogPath "/" ["omega/query-omega/apps" AppId "log-stream/streams" LogStreamId])
+    (datastore LogLoc LogPath)
+    (log-stream LogLoc Stream)
+    ;; ...
+    )
+```
 
 ## Functors Don't Work Inside Clause Bodies
 

@@ -1,3 +1,5 @@
+[< Home](../README.md) | [OmegaAI](../README.md#omegaai)
+
 # Plugins
 
 A plugin is an installable component that creates its own page tree in your workspace. Think of it like `apt-get install` — you install a plugin, it sets up everything it needs, and you operate it with standard tools.
