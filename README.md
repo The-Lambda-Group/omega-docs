@@ -23,6 +23,7 @@ The notebook application built on OmegaDB.
 ## Reference
 
 - [CLI Commands](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/commands.md) — qo command reference
+- [MCP Server](https://github.com/The-Lambda-Group/query-omega-mcp) — MCP tool interface for AI agents
 - [Public API](reference/api.md) — OQL API clause signatures
 - [Protocols](reference/protocols.md) — protocol specs and IDs
 

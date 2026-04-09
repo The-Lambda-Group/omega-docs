@@ -61,11 +61,11 @@ Every plugin follows the same patterns, uses the same CLI, and stores its data i
                     │  (query-omega)           │  
                     └────────────┬────────────┘
                                  │
-                    ┌────────────┴────────────┐
-                    │      qo CLI             │  Command-line interface
-                    │  (query-omega-cli)       │  
-                    └────────────┬────────────┘
-                                 │
+┌────────────────┐  ┌────────────┴────────────┐
+│   MCP Server   │  │      qo CLI             │  Command-line interface
+│ (query-omega-  │──│  (query-omega-cli)       │  
+│  mcp)          │  └────────────┬────────────┘
+└────────────────┘               │
                     ┌────────────┴────────────┐
                     │    Public OQL API        │  The interface components use
                     │  (query-omega-api)       │  
@@ -82,6 +82,6 @@ Every plugin follows the same patterns, uses the same CLI, and stores its data i
                     └─────────────────────────┘
 ```
 
-The **UI** and **CLI** are two ways to interact with the same system. Both call the **Public OQL API**, which is the only interface components should use. The API wraps the **Core Library**, which talks directly to the **database engine**.
+The **UI**, **CLI**, and **MCP Server** are three ways to interact with the same system. The MCP Server wraps the CLI for AI agent use. All call the **Public OQL API**, which is the only interface components should use. The API wraps the **Core Library**, which talks directly to the **database engine**.
 
 **Plugins** (like the Homes.com Connector) are built on top of this stack. They use the **Shared Component Library** (omega-ai-components) for common functionality like event handling, logging, and queries.
