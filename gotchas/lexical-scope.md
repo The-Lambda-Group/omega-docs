@@ -1,4 +1,4 @@
-[< Home](../README.md) | [OmegaDB](../README.md#omegadb)
+[< Home](../README.md) | [Gotchas](README.md)
 
 # Lexical Scope in OQL
 

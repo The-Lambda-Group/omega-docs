@@ -1,4 +1,4 @@
-[< Home](../README.md) | [OmegaDB](../README.md#omegadb)
+[< Home](../README.md) | [Explanation](README.md)
 
 # OQL Execution Model
 
