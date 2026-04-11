@@ -1,4 +1,4 @@
-[< Home](../README.md) | [OmegaAI](../README.md#omegaai)
+[< Home](../README.md) | [Explanation](README.md)
 
 # Pages
 
