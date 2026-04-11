@@ -1,4 +1,4 @@
-[< Home](../README.md) | [Reference](../README.md#reference)
+[< Home](../README.md) | [Reference](README.md)
 
 # Public API Reference
 
