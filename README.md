@@ -1,33 +1,21 @@
 # Omega Documentation
 
-Documentation for the [Omega](https://github.com/The-Lambda-Group) platform.
+Documentation for the [Omega](https://github.com/The-Lambda-Group) platform, organized as a Diátaxis+gotchas tree. Every top-level bucket indexes its own entries — start here, then descend.
 
-- [What is Omega?](intro.md)
+## Navigation
 
-## OmegaDB
+- [how-to/](how-to/README.md) — task recipes ("how do I do X")
+- [reference/](reference/README.md) — API, schemas, protocol IDs, command lists ("what is the signature of X")
+- [explanation/](explanation/README.md) — design rationale, architecture, mechanisms ("how does X work")
+- [gotchas/](gotchas/README.md) — failure modes and debugging patterns ("why did X fail")
 
-The logic database engine and query language.
+## If you're working with an agent
 
-- [OQL Language](omegadb/language.md) — terms, clauses, datastores, control flow
-- [Execution Model](omegadb/execution-model.md) — solution sets, clause boundaries, performance
-- [Lexical Scope](omegadb/lexical-scope.md) — how scoping works in clause bodies
+This repo is the public half of the Omega knowledge base. Agents should start at the private root at `~/Development/omega/omega-knowledge-base/README.md` and descend from there — the private root links back into this repo.
 
-## OmegaAI
+The taxonomy is described in detail at `omega-knowledge-base/contributor/reference/diataxis.md`.
 
-The notebook application built on OmegaDB.
+## Related
 
-- [Pages](omega-ai/pages.md) — pages, blocks, page tree
-- [Components](omega-ai/components.md) — components, protocols, implementations, push/run
-- [Plugins](omega-ai/plugins.md) — plugin lifecycle, actor model, service protocol
-
-## Reference
-
-- [CLI Commands](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/commands.md) — qo command reference
-- [MCP Server](https://github.com/The-Lambda-Group/query-omega-mcp) — MCP tool interface for AI agents
-- [Public API](reference/api.md) — OQL API clause signatures
-- [Protocols](reference/protocols.md) — protocol specs and IDs
-
-## Learn
-
-- Getting Started *(coming soon)*
-- Building a Plugin *(coming soon)*
+- [query-omega-cli commands](https://github.com/The-Lambda-Group/query-omega-cli/blob/master/docs/reference/commands.md) — `qo` command reference (lives in that repo's `/docs/` tree after Plan 2)
+- [MCP Server](https://github.com/The-Lambda-Group/query-omega-mcp)
