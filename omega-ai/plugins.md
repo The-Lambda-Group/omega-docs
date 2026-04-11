@@ -10,34 +10,34 @@ When you install a plugin, it creates a page tree under your workspace:
 
 ```
 Component Installs/
-  Homes.com Connector/              <- the plugin's root page
-    Homes.com Event Listener/       <- event handler + log stream
-    Homes.com Data/                 <- source data table
+  Payments Connector/               <- the plugin's root page
+    Payments Event Listener/        <- event handler + log stream
+    Payment Events/                 <- source data table (raw webhook events)
     Events/
       Coordinator/                  <- routes events between steps
-      Score Agents/                 <- scoring logic
-      Filter Agents/                <- filtering logic
-      GHL Sync/                     <- CRM sync
+      Parse Events/                 <- event parsing logic
+      Reconcile Balances/           <- reconciliation logic
+      Report Deltas/                <- reporting logic
     Data/
-      Scored Agents/                <- output table
-      Filtered Agents/              <- output table
-      GHL Contacts/                 <- sync ledger
+      Parsed Events/                <- output table
+      Balance Snapshots/            <- output table
+      Daily Deltas/                 <- reporting output
 ```
 
 Every page in this tree is inspectable:
 
 ```bash
-qo ls "Component Installs/Homes.com Connector" -v   # see the tree
-qo query "Component Installs/.../Data/Scored Agents"  # query a table
-qo logs "Component Installs/.../Homes.com Event Listener"  # read logs
-qo describe "Component Installs/.../Data/Scored Agents"    # see schema
+qo ls "Component Installs/Payments Connector" -v      # see the tree
+qo query "Component Installs/.../Data/Balance Snapshots"  # query a table
+qo logs "Component Installs/.../Payments Event Listener"  # read logs
+qo describe "Component Installs/.../Data/Balance Snapshots"  # see schema
 ```
 
 ## Unix-Style Philosophy
 
 Plugins should feel like Unix services:
 
-- **Do one thing well.** A plugin has a clear purpose. The Homes.com Connector scrapes agents, scores them, and syncs to a CRM. That's it.
+- **Do one thing well.** A plugin has a clear purpose. A payments connector receives webhooks, reconciles balances, and reports deltas. That's it.
 - **Inspectable state.** All data lives in database tables you can query. No hidden internal state.
 - **Standard lifecycle.** Every plugin supports install, start, stop, status through standard protocols.
 - **Composable.** Plugins communicate through events, not direct coupling. You can swap out a scoring plugin without touching the sync plugin.
