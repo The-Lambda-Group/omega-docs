@@ -84,12 +84,21 @@
 
 ```oql
 (string-split Path "/" Segments)          ;; split string
-(string-concat "Hello " Name Greeting)   ;; concatenate strings
+(string-concat "Hello " Name Greeting)   ;; concatenate strings (strictly binary — two inputs + output)
 (string-contains Str "sub" Result)        ;; check substring
 (string-replace Str "," "" Clean)         ;; replace substring
 (re-find Str "\\d+" Match)               ;; regex find
 (json-stringify Obj Str)                  ;; JSON: object <-> string (bidirectional)
 ```
+
+**`string-concat` is binary, not variadic.** It always takes exactly two input strings and an output. To concatenate three or more strings, chain calls and thread an intermediate variable through each step:
+
+```oql
+(string-concat "https://api.example.com/contacts/?locationId=" LocationId Url0)
+(string-concat Url0 "&limit=100" Url)
+```
+
+**`json-stringify` is bidirectional.** When the second arg is a symbol, it stringifies the first (object → JSON string). When the first arg is a symbol, it parses the second (JSON string → object). The existing query implementations rely on both directions.
 
 ## HTTP
 
