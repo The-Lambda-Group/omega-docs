@@ -1,4 +1,4 @@
-[< Language](../language.md) | [OmegaDB](../../README.md#omegadb)
+[< Home](../README.md) | [Gotchas](README.md)
 
 # Conventions & Gotchas
 

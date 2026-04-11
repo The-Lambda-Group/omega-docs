@@ -1,4 +1,4 @@
-[< Language](../language.md) | [OmegaDB](../../README.md#omegadb)
+[< Home](../README.md) | [Reference](README.md)
 
 # Datastores, Functors & defterm
 
