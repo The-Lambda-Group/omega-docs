@@ -16,7 +16,3 @@ Factual lookup for Omega APIs, schemas, and IDs. Read these when you need exact 
 
 - [Public API](api.md) — OQL API clause signatures
 - [Protocols](protocols.md) — protocol IDs and JSON specs
-
-## Tooling
-
-- [Tools](tools.md) — asset-generation scripts shipped with omega-docs
