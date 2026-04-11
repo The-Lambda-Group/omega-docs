@@ -28,17 +28,77 @@ Memorize these; every task uses them.
 
 The reference implementation for all three queries is [`get-contact.oql`](../../../../../wttc/gohighlevel/impl/095bb6c8-gohighlevel-connector/755835ce-queries/8586ba3b-get-contact/65fd8e7d-implementation.oql). Every new query walks the same parent chain to read the push connector config, builds an `http-request` map, dispatches responses via flat sequential `with-table-if`s, and returns a normalized `{status, ...}` map.
 
-## OQL gotchas that shape the implementation
+## OQL dispatch pattern — the thing to get right
 
-Every OQL file in this plan bakes in these constraints from `projects/query-omega-oql/gotchas/` in the knowledge base:
+The canonical reference for everything below is [`omega-docs/reference/control-flow.md`](../../reference/control-flow.md) and the live implementation at [`wttc/homes-dot-com/impl/.../ghl-sync/bfe95f5a-implementation.oql`](../../../../../wttc/homes-dot-com/impl/18f2e4bb-homes-com-component-library/a31e2741-events-library/8e5821d0-ghl-sync/bfe95f5a-implementation.oql). Read both before writing any OQL in this plan — the rest of this section is a compressed field guide, not a replacement.
 
-1. **Use `http-request` only.** Never `http-get-request` / `http-post-request` — those silently drop status codes. See `http-request-only.md`.
-2. **Flat sequential `with-table-if`s, never nested.** Nested branches hide which clause actually crashed in stack traces. See the HDC post-mortem.
-3. **Every non-2xx status must be reachable by the dispatch.** The final `(defined Result)` fallback catches any status the explicit branches didn't handle (422, 500, etc.) and binds an error shape. See `four-twenty-two-falls-through-dispatch.md`.
-4. **Literal maps/lists inside `throw` / `run-page` don't resolve symbols.** Always bind the map to a symbol first via `(= M {...})`, then pass `M`. Safe inside `(=)` itself — the literal-map gotcha only affects `throw` and `run-page`. See `mixed-literal-throw-run-page.md`.
-5. **`with-table-if` schema must include a per-row identity.** For these single-row queries (only one `Exec` processed), the schema columns used here are enough — there's no multi-row collapse risk. But the pattern is kept consistent with multi-row impls so it ports later. See `with-table-if-schema-collapse.md`.
-6. **GETs must NOT set `Content-Type`.** Cloudflare's WAF (in front of GHL) 400s GET requests with a Content-Type header. Use `Accept: application/json` on GETs. POST and DELETE may set `Content-Type: application/json`.
-7. **Never use boolean `true` / `false` in OQL.** Always `"true"` / `"false"` as strings.
+### `with-table-if` argument order (4-arg form)
+
+```oql
+(with-table-if CONDITION
+  [SCHEMA]
+  THEN-BRANCH
+  ELSE-BRANCH)
+```
+
+**Condition first, schema second, then-branch third, else-branch fourth.** This is what `ghl-sync` and `get-contact` use and what `control-flow.md` documents. Some older gotcha-doc examples show a 3-arg schema-first form — ignore those; use this 4-arg form.
+
+The schema is the set of variables in lexical scope for both branches. Variables bound in the condition (e.g. `(get ParsedRes "customFields" Fields)`) do not automatically flow into the branch bodies — re-bind them inside the body if needed.
+
+### `(defined X)` is effectively `WHERE true`
+
+Never use `(defined X)` as a `with-table-if` branch condition. Once `X` is in lexical scope, `(defined X)` is true *universally*, so the branch fires for every row. This is documented in [`projects/query-omega-oql/gotchas/defined-is-universal.md`](../../../../omega-knowledge-base/projects/query-omega-oql/gotchas/defined-is-universal.md). **Use concrete per-row predicates** like `(= HttpStatus 200)`, `(get Map "key" _)`, or `(get [200 201] _ HttpStatus)`.
+
+### Status membership: `(get [200 201] _ HttpStatus)`
+
+The `ghl-sync` pattern for "is HttpStatus one of these values" is `(get [200 201] _ HttpStatus)` — a `get` with an underscore index acts as a membership check because unification succeeds at whichever index contains `HttpStatus`. Cleaner than `(or (= HttpStatus 200) (= HttpStatus 201))`.
+
+### No `not`, no separate "complement" branches — use the else
+
+OQL doesn't have a usable `not` operator for dispatch (and even if it did, stacking multiple `with-table-if`s with negated conditions is harder to read and to verify). The else-branch of a `with-table-if` **already is** the complement of the condition — it fires for every row where the condition is false. That's the entire dispatch mechanism.
+
+**The pattern: a single `with-table-if` with two branches, then for success and else for the rest.** Every row binds `Result` exactly once — once in the then if the condition holds, once in the else otherwise.
+
+```oql
+(with-table-if CONDITION
+  [SCHEMA]
+  ;; then: success case — bind Result to the ok envelope
+  (= Result {"status" "ok" ...})
+  ;; else: complement — bind Result to the error envelope
+  (= Result {"status" "error" "code" HttpStatus "body" ResBody}))
+```
+
+One with-table-if covers both cases. No chaining of status membership with its negation. No De Morgan gymnastics. No silent row drops (the else-branch is a real binding, not a no-op passthrough).
+
+**When you actually need three-way dispatch** (e.g. ok / not-found / error): you have two choices. The first is to collapse the middle case into the error envelope (the caller can read `code: 404` out of the error map) — that keeps you at a single with-table-if and is the right call for throwaway one-off queries like these. The second is to use a data-driven dispatch via a lookup structure (e.g. a map keyed by status code) so the dispatch logic lives in data rather than in nested branches. Either way, **do not introduce nested `with-table-if`s or separate "fallback" branches that re-check conditions** — that's the anti-pattern the user has been calling out, and it's the same structural shape that hid the halt-at-94200 bug.
+
+### Check-then-rebind for body-shape-dependent success
+
+When the success predicate includes "the body has this key," check existence in the condition and re-bind the value in the body:
+
+```oql
+(with-table-if (and (get [200 201] _ HttpStatus)
+                    (get ParsedRes "customFields" _))   ;; check key exists
+  [HttpStatus ParsedRes ResBody Result]
+  (and (get ParsedRes "customFields" Fields)            ;; re-bind value in body
+       (= Result {"status" "ok" "fields" Fields}))
+  (= Result {"status" "error" "code" HttpStatus "body" ResBody}))
+```
+
+Why not just bind once in the body? Because if `(get ParsedRes "customFields" Fields)` fails (key missing), the whole then-branch body fails → row drops silently from the solution. That's the halt-at-94200 pattern. Check in the condition, re-bind in the body. The else-branch handles both "non-2xx" and "2xx with missing key" cases in one place.
+
+### Row-drop idiom: `(= true false)`
+
+Inside a then-branch, `(= true false)` fails unification → row drops from the solution. Used in `ghl-sync` to filter 422 rows out of the batch before they reach the write step. Not used in this plan's single-row queries (no batching), but worth knowing.
+
+## Other OQL gotchas that shape the implementation
+
+1. **Use `http-request` only.** Never `http-get-request` / `http-post-request` — those silently drop status codes. See [`projects/query-omega-oql/gotchas/http-request-only.md`](../../../../omega-knowledge-base/projects/query-omega-oql/gotchas/http-request-only.md).
+2. **Flat sequential `with-table-if`s, never nested.** Nested branches hide which clause actually crashed in stack traces, and the schema-collapse concerns compound across levels. The user calls this "an anti-pattern in OQL frankly" — every dispatch in this plan is flat.
+3. **Literal maps/lists inside `throw` / `run-page` don't resolve symbols.** Always bind the map to a symbol first via `(= M {...})`, then pass `M`. Safe inside `(=)` itself — the literal-map gotcha only affects `throw` and `run-page`. See [`mixed-literal-throw-run-page.md`](../../../../omega-knowledge-base/projects/query-omega-oql/gotchas/mixed-literal-throw-run-page.md).
+4. **`with-table-if` schema must include a per-row identity.** For these single-row queries (only one `Exec` processed), there's no multi-row collapse risk, but the discipline is kept consistent with `ghl-sync`. See [`with-table-if-schema-collapse.md`](../../../../omega-knowledge-base/projects/query-omega-oql/gotchas/with-table-if-schema-collapse.md).
+5. **GETs must NOT set `Content-Type`.** Cloudflare's WAF (in front of GHL) 400s GET requests with a Content-Type header. Use `Accept: application/json` on GETs. POST and DELETE may set `Content-Type: application/json`.
+6. **Never use boolean `true` / `false` in OQL.** Always `"true"` / `"false"` as strings.
 
 ## File structure
 
@@ -109,8 +169,12 @@ Create the file at the path from Step 3 with the following content:
 ;;   {"status" "error" "code" <http-status> "body" "<raw body>"}
 ;;
 ;; GET /locations/{locationId}/customFields
-;; Uses http-request (not deprecated variants) so we can branch on HTTP status.
-;; Uses Accept: application/json (NOT Content-Type) on GETs per Cloudflare gotcha.
+;;
+;; Dispatch: one with-table-if, then=success, else=complement (error).
+;; The condition is "2xx AND body has customFields key". Every row binds
+;; Result exactly once — the then-branch handles the success case, the
+;; else-branch handles everything else (non-2xx + 2xx-with-missing-key).
+;; No (defined X) traps, no nesting, no separate fallback branches.
 
 (datastore Qo.Public.OqlApi.Impl "omega/query-omega/public/oql-api/implementation")
 (datastore Qo.Public.OqlApi.Page "omega/query-omega/public/oql-api/page")
@@ -134,48 +198,31 @@ Create the file at the path from Step 3 with the following content:
     (get GhlConfig "api-key" ApiKey)
     (get GhlConfig "location-id" LocationId)
 
-    ;; Build GET /locations/{locationId}/customFields
-    ;;
-    ;; HEADER NOTE: use Accept, NOT Content-Type, on this GET. Cloudflare
-    ;; rejects GETs with a Content-Type header as a 400 Bad Request HTML
-    ;; page before the request ever reaches GHL.
+    ;; Build GET /locations/{locationId}/customFields.
+    ;; HEADER NOTE: Accept, not Content-Type, on GETs. Cloudflare WAF rejects
+    ;; GETs with a Content-Type header as 400 before the request reaches GHL.
     (string-concat "https://services.leadconnectorhq.com/locations/" LocationId UrlA)
     (string-concat UrlA "/customFields" Url)
     (string-concat "Bearer " ApiKey AuthVal)
     (= Req {"method" "GET"
-             "url" Url
-             "headers" {"Authorization" AuthVal
-                         "Version" "2021-07-28"
-                         "Accept" "application/json"}})
+            "url" Url
+            "headers" {"Authorization" AuthVal
+                       "Version" "2021-07-28"
+                       "Accept" "application/json"}})
     (http-request Req Res)
     (get Res "status" HttpStatus)
     (get Res "body" ResBody)
+    (json-stringify ParsedRes ResBody)
 
-    ;; 2xx → parse body and extract the fields list.
-    ;;
-    ;; IMPORTANT: the exact key GHL returns the array under is not confirmed
-    ;; in advance. First smoke test will print the raw body; adjust the
-    ;; (get ParsedRes "customFields" ...) to the actual key if it differs.
-    (with-table-if (or (= HttpStatus 200) (= HttpStatus 201))
-      [HttpStatus ResBody SuccessFields]
-      (and (json-stringify ParsedRes ResBody)
-           (get ParsedRes "customFields" SuccessFields))
-      (= true true))
-
-    ;; Dispatch success → ok shape
-    (with-table-if (defined SuccessFields)
-      [SuccessFields Result]
-      (= Result {"status" "ok" "fields" SuccessFields})
-      (= true true))
-
-    ;; Fallback: if Result is still not bound (any non-2xx, or 2xx with a
-    ;; different body shape), emit an error shape. This catches 422, 500,
-    ;; and any other status the explicit branches don't match.
-    (with-table-if (defined Result)
-      [Result HttpStatus ResBody]
-      (= true true)
-      (and (= ErrResult {"status" "error" "code" HttpStatus "body" ResBody})
-           (= Result ErrResult))))
+    ;; Dispatch: then = ok (2xx + customFields present), else = error (everything else).
+    ;; Check-then-rebind: condition checks the key exists; body re-binds Fields
+    ;; and sets Result. Else covers non-2xx AND 2xx-with-missing-key in one branch.
+    (with-table-if (and (get [200 201] _ HttpStatus)
+                        (get ParsedRes "customFields" _))
+      [HttpStatus ParsedRes ResBody Result]
+      (and (get ParsedRes "customFields" Fields)
+           (= Result {"status" "ok" "fields" Fields}))
+      (= Result {"status" "error" "code" HttpStatus "body" ResBody})))
 
 (= Clauses {"run" {"2" Run}})
 (get $$ARG$$ "implementation-id" ImplId)
@@ -281,6 +328,10 @@ Create the file at the path from Step 3 with the following content:
 ;;   {"status" "error" "code" <http-status> "body" "<raw body>"}
 ;;
 ;; POST /locations/{locationId}/customFields
+;;
+;; Dispatch: one with-table-if, then=success, else=error. Same pattern as
+;; list-custom-fields. A separate upstream with-table-if handles the optional
+;; "extra" merge into the POST body.
 
 (datastore Qo.Public.OqlApi.Impl "omega/query-omega/public/oql-api/implementation")
 (datastore Qo.Public.OqlApi.Page "omega/query-omega/public/oql-api/page")
@@ -307,19 +358,19 @@ Create the file at the path from Step 3 with the following content:
     (get GhlConfig "api-key" ApiKey)
     (get GhlConfig "location-id" LocationId)
 
-    ;; Build POST body. BaseBody always contains the three required fields
-    ;; in camelCase (GHL wire format). If the caller provided "extra", merge
-    ;; it on top so any additional GHL fields flow through.
+    ;; Build POST body. BaseBody has the three required fields in camelCase
+    ;; (GHL wire format). If the caller provided "extra", merge it on top.
+    ;; The with-table-if conditional bind has a concrete per-row condition
+    ;; `(get Data "extra" _)` — checks key existence, NOT (defined X).
     (= BaseBody {"name" FieldName "dataType" DataType "model" Model})
-
-    (with-table-if (get Data "extra" Extra)
-      [BaseBody Extra Body]
-      (merge BaseBody Extra Body)
+    (with-table-if (get Data "extra" _)
+      [Data BaseBody Body]
+      (and (get Data "extra" Extra)
+           (merge BaseBody Extra Body))
       (= Body BaseBody))
 
-    ;; Serialize map → JSON string (json-stringify is bidirectional: if the
-    ;; first arg is bound as a map, second becomes a string; if the second
-    ;; is bound as a string, first becomes a parsed object).
+    ;; Serialize map → JSON string. json-stringify is bidirectional; with
+    ;; Body bound as a map, BodyJson becomes a JSON string.
     (json-stringify Body BodyJson)
 
     ;; Build POST /locations/{locationId}/customFields
@@ -327,38 +378,25 @@ Create the file at the path from Step 3 with the following content:
     (string-concat UrlA "/customFields" Url)
     (string-concat "Bearer " ApiKey AuthVal)
     (= Req {"method" "POST"
-             "url" Url
-             "headers" {"Authorization" AuthVal
-                         "Version" "2021-07-28"
-                         "Content-Type" "application/json"}
-             "body" BodyJson})
+            "url" Url
+            "headers" {"Authorization" AuthVal
+                       "Version" "2021-07-28"
+                       "Content-Type" "application/json"}
+            "body" BodyJson})
     (http-request Req Res)
     (get Res "status" HttpStatus)
     (get Res "body" ResBody)
+    (json-stringify ParsedRes ResBody)
 
-    ;; 2xx → parse body and extract the field.
-    ;;
-    ;; NOTE: the exact key for the created-field response is not confirmed
-    ;; in advance. If the smoke test shows the raw body has a different
-    ;; key, adjust the (get ParsedRes "customField" ...) call below.
-    (with-table-if (or (= HttpStatus 200) (= HttpStatus 201))
-      [HttpStatus ResBody SuccessField]
-      (and (json-stringify ParsedRes ResBody)
-           (get ParsedRes "customField" SuccessField))
-      (= true true))
-
-    ;; Dispatch success → ok shape
-    (with-table-if (defined SuccessField)
-      [SuccessField Result]
-      (= Result {"status" "ok" "field" SuccessField})
-      (= true true))
-
-    ;; Fallback: error for any non-2xx or 2xx-with-unexpected-shape
-    (with-table-if (defined Result)
-      [Result HttpStatus ResBody]
-      (= true true)
-      (and (= ErrResult {"status" "error" "code" HttpStatus "body" ResBody})
-           (= Result ErrResult))))
+    ;; Dispatch: then = ok (2xx + customField present), else = error.
+    ;; Check-then-rebind: condition checks existence, body re-binds Field.
+    ;; Else covers non-2xx AND 2xx-with-missing-key.
+    (with-table-if (and (get [200 201] _ HttpStatus)
+                        (get ParsedRes "customField" _))
+      [HttpStatus ParsedRes ResBody Result]
+      (and (get ParsedRes "customField" Field)
+           (= Result {"status" "ok" "field" Field}))
+      (= Result {"status" "error" "code" HttpStatus "body" ResBody})))
 
 (= Clauses {"run" {"2" Run}})
 (get $$ARG$$ "implementation-id" ImplId)
@@ -441,10 +479,16 @@ Create the file at the path from Step 3 with the following content:
 ;; Takes: {"field-id" "<ghl-custom-field-id>"}
 ;; Returns one of:
 ;;   {"status" "ok"}
-;;   {"status" "not-found"}
 ;;   {"status" "error" "code" <http-status> "body" "<raw body>"}
+;; Note: 404 (field id doesn't exist) flows through as the error envelope
+;; with `code: 404`; callers that care can inspect that field.
 ;;
 ;; DELETE /locations/{locationId}/customFields/{fieldId}
+;;
+;; Dispatch: one with-table-if, then = ok (any 2xx), else = error. 404 is
+;; collapsed into the error envelope — callers that need to distinguish can
+;; inspect the `code` field of the error map (e.g. `code: 404`). This keeps
+;; the dispatch to a single with-table-if with a clean then/else split.
 ;;
 ;; No safety gate — delete is immediate. Callers manage their own discipline.
 
@@ -477,45 +521,21 @@ Create the file at the path from Step 3 with the following content:
     (string-concat UrlB FieldId Url)
     (string-concat "Bearer " ApiKey AuthVal)
     (= Req {"method" "DELETE"
-             "url" Url
-             "headers" {"Authorization" AuthVal
-                         "Version" "2021-07-28"
-                         "Accept" "application/json"}})
+            "url" Url
+            "headers" {"Authorization" AuthVal
+                       "Version" "2021-07-28"
+                       "Accept" "application/json"}})
     (http-request Req Res)
     (get Res "status" HttpStatus)
     (get Res "body" ResBody)
 
-    ;; 2xx → success (DELETE typically returns 200 with a minimal body or 204;
-    ;; we don't care about the body content, only that the status is 2xx)
-    (with-table-if (or (= HttpStatus 200) (= HttpStatus 204))
-      [HttpStatus Success]
-      (= Success "true")
-      (= true true))
-
-    ;; 404 → not-found (field ID doesn't exist in the location)
-    (with-table-if (= HttpStatus 404)
-      [HttpStatus NotFound]
-      (= NotFound "true")
-      (= true true))
-
-    ;; Dispatch success → ok shape
-    (with-table-if (defined Success)
-      [Success Result]
+    ;; Dispatch: then = ok (2xx), else = error (everything else including 404).
+    ;; GHL's DELETE may return 200 (body) or 204 (no body); either is success.
+    ;; Body content is not inspected on success.
+    (with-table-if (get [200 204] _ HttpStatus)
+      [HttpStatus ResBody Result]
       (= Result {"status" "ok"})
-      (= true true))
-
-    ;; Dispatch not-found
-    (with-table-if (defined NotFound)
-      [NotFound Result]
-      (= Result {"status" "not-found"})
-      (= true true))
-
-    ;; Fallback: error
-    (with-table-if (defined Result)
-      [Result HttpStatus ResBody]
-      (= true true)
-      (and (= ErrResult {"status" "error" "code" HttpStatus "body" ResBody})
-           (= Result ErrResult))))
+      (= Result {"status" "error" "code" HttpStatus "body" ResBody})))
 
 (= Clauses {"run" {"2" Run}})
 (get $$ARG$$ "implementation-id" ImplId)
@@ -540,8 +560,8 @@ Expected: `[{"status": "ok"}]`.
 
 Failure modes:
 
-1. **`[{"status": "not-found"}]`** — the field ID doesn't exist. Either the ID was wrong or the field was already deleted.
-2. **`[{"status": "error", "code": 2xx, ...}]`** — the 2xx branch didn't cover the status GHL actually returned (maybe it returns 202 or an unusual status on delete). Read the `code` field, add it to the success branch's `(or ...)` list, `qo push` again, re-run.
+1. **`[{"status": "error", "code": 404, ...}]`** — the field ID doesn't exist (wrong ID, or already deleted). The error envelope is the intentional shape for 404 in this query.
+2. **`[{"status": "error", "code": 2xx, ...}]`** — shouldn't happen because the condition covers 200 and 204, but if GHL returns a 2xx status outside `[200, 204]` (e.g. 202), the else-branch will fire. Add the new code to the `(get [200 204] _ HttpStatus)` list in the OQL, `qo push` again, re-run.
 
 - [ ] **Step 7: Verify deletion via list-custom-fields**
 
@@ -606,11 +626,11 @@ Expected: the `fields` array does NOT contain `test_e2e_20260411`.
 qo run "Component Installs/GoHighLevel Connector/Queries/delete-custom-field" -p "Query" -m "run" -a '[{"field-id": "<new-id>"}]'
 ```
 
-Using the same ID from Step 1 — it's now deleted, so GHL should 404. Expected: `[{"status": "not-found"}]`. If instead this returns `{"status": "error", "code": 400, ...}` or similar, GHL's non-existent-ID behavior is different than assumed — note it and adjust the delete query's 404 branch if needed.
+Using the same ID from Step 1 — it's now deleted, so GHL should 404. Expected: `[{"status": "error", "code": 404, "body": "..."}]` — 404 flows through as the error envelope per the collapsed dispatch. If GHL returns a different code (e.g. 400 or 200 with an error body), that's a schema surprise worth noting but not a correctness problem for this plan.
 
 - [ ] **Step 6: Commit nothing (this is verification only)**
 
-No code changed. If any step revealed a behavior mismatch and the OQL was edited and pushed, commit those edits with a descriptive message like `fix(ghl): adjust delete-custom-field not-found branch for <status>`.
+No code changed. If any step revealed a behavior mismatch and the OQL was edited and pushed, commit those edits with a descriptive message like `fix(ghl): adjust delete-custom-field dispatch for <status>`.
 
 ---
 

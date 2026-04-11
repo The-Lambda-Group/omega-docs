@@ -34,15 +34,14 @@ These queries let HDC — and any future consumer — list, create, and delete c
 
 ### Response shapes
 
-Each query returns one of three shapes:
+Each query returns one of two shapes:
 
 ```
 {"status" "ok" ...data}
-{"status" "not-found"}
 {"status" "error" "code" <http-status> "body" "<raw body>"}
 ```
 
-This matches `get-contact`. Callers branch on `status` without seeing HTTP details on the happy paths.
+The 404 case is collapsed into the error envelope — callers that need to distinguish "field doesn't exist" from "permission denied" or "rate limited" can inspect the `code` field of the error map. This keeps each query's dispatch to a single `with-table-if` (then=success, else=error) instead of chaining multiple branches. `get-contact` uses a separate `{"status" "not-found"}` shape, but `get-contact` is for contact lookup where "does this record exist" is a first-class question; custom-field queries don't have that hot path.
 
 ### Arg shapes
 
@@ -62,7 +61,7 @@ This matches `get-contact`. Callers branch on `status` without seeing HTTP detai
 - The query translates `data-type` → `dataType` internally (kebab-case is OQL idiomatic; camelCase is GHL wire format).
 - Returns `{status: "ok", field: {...}}` on 2xx.
 
-**`delete-custom-field`** takes `{field-id}`. No safety gate. Returns `{status: "ok"}` on 2xx, `{status: "not-found"}` on 404, `{status: "error", ...}` otherwise.
+**`delete-custom-field`** takes `{field-id}`. No safety gate. Returns `{status: "ok"}` on 2xx, `{status: "error", "code": <http-status>, "body": "..."}` otherwise. 404 (field not found) flows through as the error envelope with `code: 404`.
 
 ### No shared `ghl-request` helper
 
