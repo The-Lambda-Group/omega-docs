@@ -147,7 +147,44 @@ The skill is still invokable for edge cases (batching, complex gaps that need ma
 
 > Gap-filing rules are embedded in README.md files throughout the tree (look for `## Gap rules` sections). Follow them as you descend — they tell you when to fire a gap-fill agent for the subtree you're in.
 
-### 6. What this does NOT include
+### 6. KB position awareness — "where am I in the tree?"
+
+The navigator currently fires at session start and during explicit lookups, but the assistant doesn't maintain ongoing awareness of its position in the KB tree. This leads to gaps being missed because the assistant doesn't think in terms of "I am working at `projects/homes-dot-com/` right now, and the gotchas for this subtree say X."
+
+**The rule:** The assistant must always know which KB subtree its current task lives under. This is like `pwd` for documentation — you always know where you are.
+
+**Enforcement via the SessionStart hook:**
+
+The hook injects this as a hard rule alongside the dispatch template:
+
+```
+KB POSITION AWARENESS — hard rule for this session:
+
+Before starting any task, identify which KB subtree it belongs to. State it explicitly:
+"This task lives at projects/<name>/ in the KB."
+
+If the task has NO corresponding KB subtree or entry:
+- BLOCKER: file a gap to create the subtree BEFORE starting the task.
+- This is not optional. You cannot work on something that doesn't exist in the KB.
+- The gap-fill agent will create at minimum a pointer file; for substantial work,
+  it will promote to a subtree with README + 4-bucket structure.
+
+When you switch tasks or projects mid-session, re-orient:
+"Switching to projects/<other-name>/." Read that subtree's README for its gap rules.
+
+When descending into a bucket (gotchas/, how-to/, etc.), note the bucket's gap rules
+if they exist. These refine your firing discipline for the work you're about to do.
+```
+
+This means the KB grows in lockstep with the work. Every task either maps to an existing subtree (and benefits from its docs + gap rules) or creates one (and establishes the foundation for future sessions). No orphaned work that future sessions can't find.
+
+**Impact on the navigator skill:**
+
+The navigator's "descend-from-root" rule already requires walking the parent chain. The new rule adds: "after descending, ANNOUNCE your position." This makes the position explicit in the conversation so the user (and compressed-context future turns) can see it.
+
+The navigator's "When this skill does NOT fire" section gets a new condition: "You are already positioned at a subtree from a prior descent in this session AND the current task is in the same subtree." This prevents redundant re-descents while maintaining the position-awareness rule.
+
+### 7. What this does NOT include
 
 - **No cron/loop for periodic maintenance.** The assistant IS the maintenance process. SessionStart cleanup + in-session discipline is sufficient.
 - **No automated debug-pattern detection.** The firing rules are behavioral — the assistant follows them based on judgment. If we need more automation later, it can be added as a hook that fires after tool errors, but that's a separate project.
@@ -161,3 +198,5 @@ The skill is still invokable for edge cases (batching, complex gaps that need ma
 3. The assistant proactively files gaps based on firing rules discovered during normal KB navigation.
 4. Project-specific firing rules can be added by editing a README — no plugin changes needed.
 5. The SessionStart hook injects the dispatch template so the assistant is always primed to file.
+6. The assistant always knows which KB subtree its current task belongs to and announces it.
+7. Tasks with no KB subtree trigger a blocker gap before work begins — the KB grows in lockstep with the work.
