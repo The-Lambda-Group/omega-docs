@@ -158,7 +158,9 @@ This replaces the verbose anti-pattern of extracting each field individually:
 
 ## Symbols in Literal Arguments
 
-Symbol bindings do not resolve inside literal map or list arguments to the `throw` and `run-page` primitives. The contents of the literal are read at parse time, before the row context binds symbols — so `{"key" MySymbol}` becomes a literal map with the *text* `"MySymbol"`, not the value of `MySymbol`.
+Symbol bindings do not resolve inside literal map or list arguments passed directly to any term. This is a general OQL behavior, not specific to particular primitives — it affects `throw`, `run-page`, `set-data`, and every other term that accepts a map or list in an argument position. The contents of the literal are read at parse time, before the row context binds symbols — so `{"key" MySymbol}` becomes a literal map with the *text* `"MySymbol"`, not the value of `MySymbol`.
+
+**The fix is always the same:** bind the map to a variable with `(=)` first, then pass the variable.
 
 ```oql
 ;; WRONG — Payload stays as a literal symbol name
@@ -176,7 +178,18 @@ Same pattern for `run-page`:
 (run-page "some-page" Args)
 ```
 
-The primitives accept their arguments as values, not as expressions — the argument position is a value slot. When you write a literal map directly in the call site, OQL reads it as a literal value before evaluating expressions. Only when the map is bound to a symbol via `(=)` does the binder first evaluate the expressions inside the map and then assign the result.
+Same pattern for datastore operations like `set-data`:
+
+```oql
+;; WRONG — ResearcherInputStr is stored as the literal text "ResearcherInputStr"
+(set-data Page "Config" {"name" "Config" "input-pages" ResearcherInputStr} _)
+
+;; RIGHT — bind first, then pass the variable
+(= Config {"name" "Config" "input-pages" ResearcherInputStr})
+(set-data Page "Config" Config _)
+```
+
+Any term accepts its arguments as values, not as expressions — the argument position is a value slot. When you write a literal map directly in the call site, OQL reads it as a literal value before evaluating expressions. Only when the map is bound to a symbol via `(=)` does the binder first evaluate the expressions inside the map and then assign the result.
 
 ## HTTP
 
