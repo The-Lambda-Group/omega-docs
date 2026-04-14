@@ -28,6 +28,61 @@ When a term produces multiple results, the solution set grows:
 
 Every subsequent term is **joined** against this table — like a SQL JOIN. This is why OQL can blow up: if you have 1000 rows from a page query and then do a prop-vals lookup, you're doing a 1000-way join.
 
+## Terms Are Not Expressions
+
+This is the single most important thing to understand before writing OQL: **terms do not return values.** Every term takes a solution set in, transforms it, and produces a new solution set out. This makes OQL a pipeline language, not an expression language.
+
+In a functional or imperative language, you compose expressions by nesting them:
+
+```javascript
+// JavaScript — expressions return values, so nesting works
+const result = { "key": x === "" ? "a" : "b" };
+```
+
+In OQL, the equivalent **does not work**:
+
+```oql
+;; WRONG — the runtime does not evaluate (if ...) inside the map literal.
+;; It serializes the raw AST and you get garbage back.
+(= Result {"key" (if (= X "") "a" "b")})
+```
+
+The `if` term is not an expression that returns `"a"` or `"b"`. It is a solution-set transformer — it takes the current set of bindings, evaluates a condition, and produces new bindings in the then-branch or else-branch. You cannot put a solution-set transformer inside a map literal any more than you could put a SQL `SELECT` statement inside a JSON value.
+
+**The correct pattern: bind first, reference later.**
+
+```oql
+;; CORRECT — bind the variable with a term, then reference it in the literal
+(if (= X "")
+  (= Status "a")
+  (= Status "b"))
+(= Result {"key" Status})
+```
+
+This applies to every term, not just `if`:
+
+```oql
+;; WRONG — (get ...) is a term, not an expression
+(= Result {"name" (get Data "full-name" _)})
+
+;; CORRECT — bind first, reference later
+(get Data "full-name" Name)
+(= Result {"name" Name})
+```
+
+```oql
+;; WRONG — (json-stringify ...) is a term, not an expression
+(= Result {"count" (json-stringify _ RawCount)})
+
+;; CORRECT
+(json-stringify Count RawCount)
+(= Result {"count" Count})
+```
+
+**Why does OQL work this way?** Because every term can fail (producing zero solutions), succeed once, or succeed multiple times (producing multiple solution rows). There is no single "return value" to substitute into a map — there's a transformed solution set. The only way to get a value out of a term is to bind it to a symbol, and the only way to use that symbol is to reference it downstream in the pipeline.
+
+**Diagnostic sign:** if you get back a result containing raw S-expressions like `["if", ["=", "X", ""], "a", "b"]` instead of an evaluated value, you nested a term inside a literal. Extract it into a binding step above the literal.
+
 ## Terms as Joins
 
 Think of each term as a CTE (Common Table Expression) in SQL. The engine:

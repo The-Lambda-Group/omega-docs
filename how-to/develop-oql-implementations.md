@@ -8,6 +8,7 @@ OQL development is REPL-driven. You build queries incrementally, one step at a t
 
 Before writing any OQL implementation, read:
 
+- [Execution model](../explanation/oql-execution-model.md) — how OQL evaluates queries (solution sets, why terms can't be nested inside literals)
 - [Built-in terms](../reference/built-ins.md) — the full built-in term reference
 - [Control flow](../reference/control-flow.md) — read this before writing any `when`, `when-not`, `if`, or `with-table-if`
 

@@ -12,7 +12,7 @@ The "why" of Omega — design rationale, architecture, mechanisms. Read these wh
 ## OQL
 
 - [OQL Language](oql-language.md) — logic programming concepts, clauses, constraints
-- [Execution Model](oql-execution-model.md) — solution sets, clause boundaries, performance
+- [Execution Model](oql-execution-model.md) — solution sets, why terms can't be nested inside literals, clause boundaries, performance
 
 ## OmegaAI
 
