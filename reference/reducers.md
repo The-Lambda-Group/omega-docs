@@ -97,6 +97,65 @@ Counts solutions matching a term:
 (with-count Total (Qo.Db.Prop/prop-vals FolderId _ _))  ;; Total = row count
 ```
 
+## fold pitfalls
+
+### fold is solution-wide, not per-row
+
+`fold` is a solution-wide aggregation — think SQL `GROUP BY` the whole table. It collapses all rows into one accumulated value. When you write `(fold [] P append Fields)`, fold walks every value `P` resolves to across the entire solution and appends each one into the same accumulator. The result is a single shared array that gets bound to `Fields` on every row.
+
+**Symptom:** An enrichment step uses `(fold [] P append Fields)` inside a `with-table-if` branch to build one array per row. At batch=1 (single row) it works by accident. At batch>1, every row gets the same merged array containing ALL rows' values.
+
+**The fix — use `append`:**
+
+`append` is a per-row operation (like Clojure's `conj`). It adds an element to a list within the current row's bindings, not across the solution.
+
+```oql
+;; BAD — fold builds ONE shared array across all rows
+(with-table-if [ContactId FieldPair] (defined FieldPair)
+  (fold [] FieldPair append Fields))
+;; batch=2 -> Fields = [pair-A pair-B] (both contacts get BOTH pairs)
+
+;; GOOD — append builds one array per row
+(with-table-if [ContactId FieldPair] (defined FieldPair)
+  (append Fields FieldPair Fields1))
+;; batch=2 -> contact A gets [pair-A], contact B gets [pair-B]
+```
+
+| Operation | Scope | Analogy | Use for |
+|-----------|-------|---------|---------|
+| `fold` | solution-wide | SQL `GROUP BY *` / Clojure `reduce` over the whole table | totals, counts, collecting all distinct values into one result |
+| `append` | per-row | Clojure `conj` on the current row | building an array that belongs to each row independently |
+
+### fold folds over unique values, not rows
+
+`fold` folds over the *unique values* of its input symbol, not over rows. If `X` is a column whose values are `0` or `1`, `fold` sees two unique values (`0` and `1`) and returns a sum of 1, regardless of how many rows had `X = 1`.
+
+**Symptom:** `(fold 0 X + Sum)` returns a value that maxes out at 1 (or at the count of distinct values of `X`), not the expected row count.
+
+**The fix:** Use `with-unique-by` to make fold see one value per unique row key:
+
+```oql
+(Qo.Db.Prop/prop-val! "FolderId" "PageId" "NeedsCreate" NeedsCreate)
+
+;; BAD — Sum maxes at 1 even if 500 rows have NeedsCreate
+(fold 0 NeedsCreate + Sum)
+
+;; GOOD — Sum = count of rows
+(with-unique-by [RowId]
+  (fold 0 NeedsCreate + Sum))
+```
+
+Or count rows directly with a literal `1` instead of a column:
+
+```oql
+(with-table-if [RowId NeedsCreate] (= NeedsCreate "true")
+  (fold 0 1 + Count))
+```
+
+### Why batch=1 masks fold bugs
+
+With one row in the solution, "all rows" and "this row" are the same set. The fold accumulator contains exactly one row's values, so the output looks correct. Both fold pitfalls only surface when the batch contains two or more rows.
+
 ## with-limit (not yet implemented)
 
 **Warning:** `with-limit` is parsed by the interpreter but not fully implemented in the runtime. It will crash if used. This is a known TODO.

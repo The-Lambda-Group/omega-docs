@@ -11,6 +11,7 @@ Factual lookup for Omega APIs, schemas, and IDs. Read these when you need exact 
 - [Control flow](control-flow.md) — `when`, `when-not`, `if`, `with-table-if`
 - [Datastores](datastores.md) — datastore and functor definitions
 - [Reducers](reducers.md) — solution table operations
+- [Query execution](query-execution.md) — `with-skip`/`with-limit` view-only constraint
 
 ## API & protocols
 

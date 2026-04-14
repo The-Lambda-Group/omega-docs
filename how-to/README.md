@@ -4,11 +4,14 @@
 
 Task recipes for working with Omega. Each entry is a step-by-step guide to accomplishing a specific task.
 
-This bucket is currently empty. Candidate guides to add:
+## OQL development
 
-- How to install a plugin
-- How to push a component
-- How to run a one-shot query against the public API
-- How to trace a failed run through the log stream
+- [Develop OQL implementations](develop-oql-implementations.md) — REPL-driven incremental workflow for building and debugging OQL queries
+- [Debug by returning early](debug-by-returning-early.md) — bisect a broken query by commenting out clauses and returning intermediate state
+- [Write scratch queries](write-scratch-queries.md) — scratch queries need `(return [Result])`; without it you get a bare 500
+- [Test at realistic batch sizes](test-at-realistic-batch-sizes.md) — catch batch-size-dependent bugs by testing at production limits
 
-Add new entries as markdown files in this directory and link them from this README.
+## OQL patterns
+
+- [Drop rows with forced unification failure](drop-rows-with-forced-unification-failure.md) — use `(= true false)` to exclude rows from a `with-table-if` branch
+- [Handle HTTP 422 in dispatch](handle-http-422-in-dispatch.md) — prevent 422 responses from leaking through status dispatch

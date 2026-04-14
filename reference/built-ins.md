@@ -98,11 +98,89 @@
 (string-concat Url0 "&limit=100" Url)
 ```
 
-**`json-stringify` is bidirectional.** When the second arg is a symbol, it stringifies the first (object → JSON string). When the first arg is a symbol, it parses the second (JSON string → object). The existing query implementations rely on both directions.
+**`json-stringify` is bidirectional — there is no `json-parse`.** Direction is determined by which argument is bound:
+
+- **Stringify (object to string):** bind the first arg, leave the second unbound.
+  ```oql
+  (= Data {"name" "Alice" "age" 30})
+  (json-stringify Data JsonStr)        ;; JsonStr = "{\"name\":\"Alice\",\"age\":30}"
+  ```
+
+- **Parse (string to object):** leave the first arg unbound, bind the second.
+  ```oql
+  (get Res "body" RawBody)             ;; RawBody is a JSON string from an HTTP response
+  (json-stringify Parsed RawBody)      ;; Parsed is now a map/array you can (get ...) into
+  ```
+
+There is no `json-parse` built-in. Calling `(json-parse Body Result)` produces a 500 with no hint that you need `json-stringify` with reversed binding.
+
+## Data Transformation Patterns
+
+The terms `merge`, `get-list`, `zip`, and `select-keys` (documented in Map Operations and Array Operations above) form the primary data manipulation toolkit. Prefer these over extracting fields one-by-one with `(get Map "key" Val)`.
+
+### Preparing data for `write-table`
+
+`write-table` expects columnar input: `{"file-id" FolderId "data" {"header" [...] "rows" [...]}}`. The efficient pattern is:
+
+1. Define the header array once (this is the column order contract).
+2. For each record, use `get-list` or `zip` (reverse) to extract values in that exact order.
+3. Pass `{"header" Header "rows" [Values]}` to `write-table`.
+
+```oql
+;; Define the column order
+(= Header ["name" "email" "status"])
+
+;; Extract values from an API response record in column order
+(get-list Record ["name" "email" "status"] Row)
+
+;; Build the write-table input
+(= Input {"file-id" PageId "data" {"header" Header "rows" [Row]}})
+(Qo.Public.OqlApi.Db.Prop/write-table Input _)
+```
+
+This replaces the verbose anti-pattern of extracting each field individually:
+
+```oql
+;; Don't do this — verbose, fragile, easy to get column order wrong
+(get Record "name" Name)
+(get Record "email" Email)
+(get Record "status" Status)
+```
+
+### When to use which
+
+| Need | Term |
+|------|------|
+| Combine fields from two sources | `merge` |
+| Extract values in column order (for `write-table`) | `get-list` or `zip` (reverse) |
+| Convert row array + header to map | `zip` (forward) |
+| Drop unwanted fields from a map | `select-keys` |
+
+## Symbols in Literal Arguments
+
+Symbol bindings do not resolve inside literal map or list arguments to the `throw` and `run-page` primitives. The contents of the literal are read at parse time, before the row context binds symbols — so `{"key" MySymbol}` becomes a literal map with the *text* `"MySymbol"`, not the value of `MySymbol`.
+
+```oql
+;; WRONG — Payload stays as a literal symbol name
+(throw "error-tag" {"payload" Payload "count" 42})
+
+;; RIGHT — bind the map to a symbol first, then pass the symbol
+(= Data {"payload" Payload "count" 42})
+(throw "error-tag" Data)
+```
+
+Same pattern for `run-page`:
+
+```oql
+(= Args {"row-id" RowId "status" Status})
+(run-page "some-page" Args)
+```
+
+The primitives accept their arguments as values, not as expressions — the argument position is a value slot. When you write a literal map directly in the call site, OQL reads it as a literal value before evaluating expressions. Only when the map is bound to a symbol via `(=)` does the binder first evaluate the expressions inside the map and then assign the result.
 
 ## HTTP
 
-**`http-request`** is the general-purpose HTTP term. It takes a request map and returns a response map. The request map is passed directly to the underlying HTTP client ([clj-http](https://github.com/dakrone/clj-http)), so all clj-http options are supported.
+**`http-request`** is the general-purpose HTTP term and the only safe HTTP primitive. It takes a request map and returns a response map. The request map is passed directly to the underlying HTTP client ([clj-http](https://github.com/dakrone/clj-http)), so all clj-http options are supported.
 
 ```oql
 ;; GET with query params
@@ -150,7 +228,7 @@
 
 ### Deprecated method-specific terms
 
-These still work but prefer `http-request` for new code:
+`http-get-request` and `http-post-request` are **deprecated**. They do not capture HTTP error codes (e.g. 500s, 400s). Any clause using them that hits a non-2xx response will silently fail to bind the expected response fields, leaving the calling clause with no way to distinguish success from error.
 
 ```oql
 ;; Deprecated — use http-request with "method" "get" instead
@@ -159,4 +237,6 @@ These still work but prefer `http-request` for new code:
 (http-delete-request Url {"headers" Headers} Res)
 ```
 
-These take `(Url Config Res)` instead of a single request map. They do not support `query-params` — you must build the URL manually.
+These take `(Url Config Res)` instead of a single request map. They do not support `query-params` — you must build the URL manually. When reading existing OQL, treat these as a latent bug: the clause cannot correctly handle error responses.
+
+For a clean error-handling contract, always branch on the response's status field BEFORE parsing the body — do not call `json-stringify` on the body and `get-in` into it unconditionally.

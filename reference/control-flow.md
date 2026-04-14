@@ -4,6 +4,8 @@
 
 OQL's control flow operates on solution tables. Understanding the distinction between universal quantifiers (`when`, `when-not`, `if`) and per-solution branching (`with-table-if`) is critical.
 
+**Before you write conditionals:** read this entire document. Agents who skip the reference consistently make the same mistakes — using `if` for per-row branching (it's universal, not per-row), missing the `get`-as-condition pattern, and forgetting per-row identity in `with-table-if` schemas.
+
 ## when / when-not / if (universal quantifiers)
 
 These operate as **"if any"** — they pass or fail based on whether *any* solution in the current solution set satisfies the condition. They don't branch per-solution.
@@ -265,3 +267,161 @@ When you do nest, keep the inner `with-table-if`'s schema at least as wide as th
 | `when-not` | Default values — bind a symbol when it's not already bound |
 | `if` | Bind one of two values based on a condition |
 | `with-table-if` | Per-solution branching — conditionally bind variables, parse values |
+
+## There is no `not` operator
+
+OQL does not have a `(not ...)` operator. `(not EXPR)` either fails to parse or silently misbehaves. The correct way to express "complement of CONDITION" is the else-branch of a single `with-table-if`.
+
+```oql
+;; BAD — (not ...) is not an OQL primitive
+(with-table-if (or (not (get [200 201] _ HttpStatus))
+                   (not (get ParsedRes "customFields" _)))
+  [AgentLink Result]
+  (= Result {"status" "error" "reason" "missing-fields"})
+  (= true true))
+
+;; GOOD — a single with-table-if with both branches
+(with-table-if (and (get [200 201] _ HttpStatus)
+                    (get ParsedRes "customFields" _))
+  [AgentLink Result]
+  (= Result {"status" "ok"})                                    ; then
+  (= Result {"status" "error" "reason" "missing-fields"}))      ; else
+```
+
+`with-table-if` partitions the incoming solution table into two sub-tables — rows where `CONDITION` is satisfiable, and rows where it isn't — and runs each sub-table through its respective branch body. There is no leftover "everything else" set to re-match, so there is no reason to need a negation operator.
+
+**Diagnostic signs you're about to hit this:**
+- You catch yourself writing two consecutive `with-table-if`s whose conditions look like `(CONDITION)` and `(not CONDITION)` or some De Morgan rewrite of the negation.
+- Your plan has a "success case" dispatch and an "error case" dispatch that share the same schema and both gate on inversions of the same symbols.
+
+In all cases: collapse to one `with-table-if` with a then-branch and an else-branch.
+
+## `with-table-if` body scope
+
+The mental model: a `with-table-if` branch body is its own lexical scope — treat it like entering a clause. The schema header `[Var1 Var2 ...]` is the clause signature: it declares what flows in from the outer scope, and what the branch body is allowed to produce back out.
+
+### Scope rules
+
+Given:
+
+```oql
+(with-table-if CONDITION
+  [A B Result]
+  THEN-BODY
+  ELSE-BODY)
+```
+
+Inside `THEN-BODY` and `ELSE-BODY`:
+
+1. **Only symbols listed in the schema `[A B Result]` flow in from the outer scope.** Any other outer-scope symbol is *not* in scope inside the branch body.
+2. **Symbols bound in `CONDITION` do NOT automatically flow into the branch body.** If the condition bound a new symbol (e.g. `(get Data "key" Val)` binds `Val`), `Val` is not visible inside the body unless it was also listed in the schema.
+3. **Symbols bound inside the branch body are local to that branch.** They do not escape to downstream clauses. If the outer scope needs to read a body-local value later, the body must unify it with a symbol that *is* in the schema — typically `Result`.
+
+### The check-then-rebind idiom
+
+The most common surprise: the condition checks the existence of a value, but the branch body can't see it. You must re-bind it inside the body.
+
+```oql
+;; BAD — Val is bound by the condition but not listed in the schema
+(with-table-if (get Data "key" Val)
+  [Data Result]
+  (= Result {"found" Val})       ;; Val is unbound here
+  (= Result {"found" "default"}))
+
+;; GOOD — list Val in the schema so it flows into the body
+(with-table-if (get Data "key" Val)
+  [Data Val Result]
+  (= Result {"found" Val})
+  (= Result {"found" "default"}))
+
+;; ALSO GOOD — re-bind inside the body from a schema-listed symbol
+(with-table-if (get Data "key" _)
+  [Data Result]
+  (and (get Data "key" BodyVal)
+       (= Result {"found" BodyVal}))
+  (= Result {"found" "default"}))
+```
+
+### The Ctx-threading pattern
+
+Because only schema-listed symbols flow in, large implementations typically roll configuration into a single `Ctx` map at the top of the query and thread `Ctx` through every `with-table-if` schema. Inside each branch body, pull the fields you need back out of `Ctx` with `(get Ctx "key" LocalName)`:
+
+```oql
+;; Top of query — build Ctx once
+(= Ctx {"filtered-folder-id" FilteredFolderId
+        "ghl-contacts-folder-id" GhlContactsFolderId
+        "auth-header" AuthHeader})
+
+;; Each branch threads Ctx through its schema and re-extracts locally.
+(with-table-if (and (= AgentStatus "create") ...)
+  [AgentLink Ctx AgentStatus Res HttpStatus]
+  (and (get Ctx "auth-header" FlowAuthHeader)
+       (get Ctx "ghl-contacts-folder-id" FlowGhlFolderId)
+       ...)
+  (= true true))
+```
+
+### Body scope checklist
+
+When you write a `with-table-if`:
+
+1. **Per-row identity column?** Add it to the schema even if neither body reads it.
+2. **Does either body need a value from the outer scope?** Add it to the schema.
+3. **Does either body need a value the condition binds?** Add it to the schema OR re-bind it inside the body via check-then-rebind.
+4. **Does either body produce a value the outer scope reads after?** Add that output symbol (usually `Result`) to the schema.
+5. **Is the header otherwise doing lexical capture magic?** It isn't. Thread `Ctx` explicitly.
+
+## `with-table-if` binding list as JOIN key
+
+The binding list (schema) is not just a visibility declaration — it is the JOIN key between the outer solution table and the inner branch. Any outer-scope variable the inner branch needs must appear in the binding list. If you omit a variable, the inner branch runs independently and results lose their association with the outer rows.
+
+This is one of the most common OQL mistakes and it is invisible without careful output inspection — no error is thrown.
+
+```oql
+;; WRONG — Data is not in the binding list; association is severed
+(with-table-if (get Data "campaign_id" SpecificId)
+  [SpecificId CampaignIds]
+  (= CampaignIds [SpecificId])
+  ...)
+
+;; RIGHT — Data is in the binding list; association preserved
+(with-table-if (get Data "campaign_id" SpecificId)
+  [Data SpecificId CampaignIds]
+  (= CampaignIds [SpecificId])
+  ...)
+```
+
+Omitting variables from the binding list does not throw an error. It silently produces incorrect results:
+
+- **Duplicated rows** — the branch result gets cross-joined back to outer rows it shouldn't match.
+- **Dropped rows** — rows collapse because the binding list lacks a distinguishing column.
+- **Misassociated rows** — a branch result gets associated with the wrong outer row because the link was severed.
+
+**When in doubt, include more variables rather than fewer.** Extra variables in the binding list cost nothing. Missing variables cause silent failures.
+
+### Three rules of the binding list
+
+The binding list enforces three rules simultaneously:
+
+1. **Visibility** (body scope above) — only schema-listed symbols are visible inside the branch.
+2. **Uniqueness** (preserving per-row identity above) — missing per-row identity columns cause `SELECT DISTINCT` collapse.
+3. **Association** (this section) — the binding list is the JOIN key; omitting variables severs the link between branch results and outer rows.
+
+## `(defined X)` — lexical scope check, not per-row filter
+
+`(defined X)` checks whether the symbol `X` is bound in the current lexical context, not whether a specific row has a value for a column named `X`. Inside a branch where `X` is in scope, `(defined X)` is true *universally* — every row sees a bound `X`, so the condition is always satisfied.
+
+In practice this means `(defined X)` alone is never the right condition for `with-table-if`. It is the OQL equivalent of `WHERE true`.
+
+```oql
+;; BAD — HTTP call for every row, because SomeOptionalField is always in lexical scope
+(Qo.Db.Prop/prop-val! "FolderId" "PageId" "SomeOptionalField" SomeOptionalField)
+(with-table-if [RowId SomeOptionalField] (defined SomeOptionalField)
+  (http-request ...))
+
+;; GOOD — branch on a per-row value
+(with-table-if [RowId NeedsCreate] (= NeedsCreate "true")
+  (http-request ...))
+```
+
+OQL's scoping model is lexical — symbols bind for the rest of the clause body. `(defined X)` is meaningful in macro contexts (compile-time) but degenerate in runtime branch conditions. Always combine it with a concrete per-row predicate, or skip it entirely and use a value check like `(= HttpStatus 200)` or `(get Row "field" Val)` (which fails per-row if the field is missing).
