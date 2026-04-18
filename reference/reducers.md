@@ -11,6 +11,8 @@ These operations work on the solution table — they aggregate, filter, or reord
 (with-group-by [Sym] Body)               ;; group solutions by symbol value
 (with-unique-by [Sym] Body)              ;; deduplicate solutions by symbol value
 (with-limit N Body)                       ;; limit to first N solutions
+(with-skip N Body)                        ;; skip first N solutions
+(with-sort Dir Body)                      ;; sort direction: "asc" or "desc"
 ```
 
 ## fold
@@ -173,3 +175,34 @@ Limits the number of solutions returned. Threads the limit into CouchDB view que
   (with-limit 10
     (Qo.Db.Prop/prop-vals FolderId PageId PropName PropVal)))
 ```
+
+## with-skip
+
+Skips the first N results from a view-indexed query. Same scoping pattern as `with-limit`:
+
+```oql
+(with-skip 20
+  (with-limit 10
+    (Qo.Db.Prop/prop-vals FolderId PageId PropName PropVal)))
+```
+
+## with-sort
+
+Controls the sort direction of view-indexed query results. Threads `descending: true` (or the default ascending) into the CouchDB view request:
+
+```oql
+;; Fetch rows in descending order
+(with-sort "desc"
+  (Qo.Db.Prop/prop-vals FolderId PageId PropVal))
+
+;; Combine with limit to get the last N rows
+(with-sort "desc"
+  (with-limit 5
+    (Qo.Db.Prop/prop-vals FolderId PageId PropVal)))
+```
+
+Values:
+- `"asc"` — ascending order (default; no-op since views return ascending by default)
+- `"desc"` — descending order (sets `descending: true` on the view query)
+
+Same ctx-scoping pattern as `with-limit` and `with-skip` — wraps a body, only affects view-indexed queries inside that body.
