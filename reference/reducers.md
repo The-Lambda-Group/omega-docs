@@ -156,6 +156,20 @@ Or count rows directly with a literal `1` instead of a column:
 
 With one row in the solution, "all rows" and "this row" are the same set. The fold accumulator contains exactly one row's values, so the output looks correct. Both fold pitfalls only surface when the batch contains two or more rows.
 
-## with-limit (not yet implemented)
+## with-limit
 
-**Warning:** `with-limit` is parsed by the interpreter but not fully implemented in the runtime. It will crash if used. This is a known TODO.
+Limits the number of solutions returned. Threads the limit into CouchDB view queries:
+
+```oql
+;; Return only the first 10 pages
+(with-limit 10
+  (Qo.Db.Prop/prop-vals FolderId PageId PropName PropVal))
+```
+
+`with-limit` wraps a body — terms inside the body respect the limit. Combine with `with-skip` for pagination:
+
+```oql
+(with-skip 20
+  (with-limit 10
+    (Qo.Db.Prop/prop-vals FolderId PageId PropName PropVal)))
+```

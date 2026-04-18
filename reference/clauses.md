@@ -45,14 +45,38 @@ When a clause head has no namespace prefix and no `!`, it's **not stored** anywh
       (= Sales 0)
       (json-stringify Sales RawSales)))
 
-;; You can call it in the same query
-(ParseSales "100" Result)   ;; Result = 100
+;; You can call it in the same query using `call`
+(call ParseSales "100" Result)   ;; Result = 100
 ```
 
 In-memory clauses are used for:
 - **Helper logic** inside an implementation (parsing, scoring, transforming)
 - **Implementation clauses** that get registered with `set-implementation-clauses`
 - **Captured clauses** passed into stored clauses via the `capture` mechanism
+
+## `clause` Term Syntax
+
+The `clause` term is an alternative way to define an in-memory clause. Instead of `(:- (Name Args...) body...)`, you write:
+
+```oql
+(clause Name [Arg1 Arg2]
+    (some-term Arg1 Intermediate)
+    (other-term Intermediate Arg2))
+```
+
+This creates a `ClauseTerm` that binds `Name` as a callable clause in the current solution. Call it with `call`:
+
+```oql
+(clause ParseValue [Raw Parsed]
+    (with-table-if (= Raw "")
+      [Raw Parsed]
+      (= Parsed 0)
+      (json-stringify Parsed Raw)))
+
+(call ParseValue "100" Result)   ;; Result = 100
+```
+
+The key difference from `(:- ...)`: the `clause` form takes arguments as a vector `[Arg1 Arg2]` rather than as part of the head `(Name Arg1 Arg2)`. Both forms produce in-memory clauses invoked with `call`.
 
 ## Inner Clauses (experimental)
 
@@ -69,7 +93,7 @@ You can define an in-memory clause inside another clause's body. It's scoped to 
 
     ;; Use it
     (get Data "value" RawVal)
-    (ParseValue RawVal Parsed)
+    (call ParseValue RawVal Parsed)
     (= Result {"parsed" Parsed}))
 ```
 
