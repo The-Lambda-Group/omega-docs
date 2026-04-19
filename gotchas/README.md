@@ -24,4 +24,6 @@ This bucket owns gotchas that are part of the **public OQL language surface** --
 
 - [run-term does not work on in-memory clauses](run-term-in-memory-clause.md) -- `run-term` expects a functor object from a datastore. Using it on an in-memory clause (bound in the solution table) produces a 500 error. Use `call` instead. Keywords: run-term, call, in-memory clause, functor, 500 error.
 
+- [run-term forces a fresh solution per row; call does not](run-term-vs-call-per-row.md) -- When a clause is invoked across N solution rows via `call` or direct solution-row expansion, non-deterministic built-ins like `uuid` are evaluated once and shared across all rows -- causing shared block-ids and `KEY_UPDATE_CONFLICT` on per-row writes. Wrap the per-row logic in a stored helper clause and invoke via `run-term` to force a fresh solution (and a fresh `uuid`) per invocation. Keywords: run-term, call, uuid, KEY_UPDATE_CONFLICT, non-deterministic, solution boundary, per-row, fresh solution, shared binding, CanNotCombine.
+
 - [with-table-if header must include captured clause symbols](with-table-if-capture-header.md) -- When calling a captured in-memory clause inside a `with-table-if` branch, the clause symbol must be listed in the header array. Without it, the symbol is unbound in the branch scope. Keywords: with-table-if, header, capture, clause symbol, scope, unbound.
