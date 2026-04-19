@@ -114,6 +114,20 @@
 
 There is no `json-parse` built-in. Calling `(json-parse Body Result)` produces a 500 with no hint that you need `json-stringify` with reversed binding.
 
+**Probing validity: use a named symbol, not `_`.** To test whether a string is valid JSON without caring about the parsed value, you might reach for the wildcard. It doesn't work — `(json-stringify _ Text)` always fails, even on known-valid JSON. Use a named (but otherwise unused) symbol instead:
+
+```oql
+;; WRONG — always fails, even for valid JSON
+(when-not (json-stringify _ Text)
+  (throw "PARSE_ERROR" ParseErr))
+
+;; RIGHT — named probe symbol, succeeds iff Text parses
+(when-not (json-stringify ParseProbe Text)
+  (throw "PARSE_ERROR" ParseErr))
+```
+
+Likely cause: `_` lets the engine pick a direction, and it chooses stringify (first arg as source) — stringifying an unbound wildcard into the already-bound string fails unification. A named symbol unifies cleanly in the parse direction. This mirrors the general OQL rule that `_` is a discard slot, not a free variable — see [Lexical scope: The `_` Symbol](../gotchas/lexical-scope.md#the-_-symbol).
+
 ## Data Transformation Patterns
 
 The terms `merge`, `get-list`, `zip`, and `select-keys` (documented in Map Operations and Array Operations above) form the primary data manipulation toolkit. Prefer these over extracting fields one-by-one with `(get Map "key" Val)`.
