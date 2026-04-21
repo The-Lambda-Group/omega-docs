@@ -56,9 +56,9 @@ Every page carries a tuple of the form `(owner, group, other) × (r, w, x)`:
 
 ### Cascading grants, materialized at write time
 
-Publishing a folder cascades `other +r` to every descendant, but the cascade happens at **publish time** as a batch write, not at **read time** as a walk. After publishing, a read is a single record lookup.
+A recursive `set-perm -R` cascades the policy to every descendant as a batch write at permission-set time, not at read time as a walk. After the write, a read is a single record lookup.
 
-This is the inverse of Azure RBAC's usual cascade-at-read pattern — appropriate for our read-heavy / publish-rare workload on CouchDB.
+This is the inverse of Azure RBAC's usual cascade-at-read pattern — appropriate for our read-heavy / permission-rare workload on CouchDB.
 
 ### Invisibility over forbidden
 
@@ -68,27 +68,33 @@ Cross-workspace `qo ls` / `qo search` / `qo read` return only what the caller ca
 
 ### `Qo.Data.Page.Policy` (new datastore)
 
-Replaces the current `Qo.Data.Page.Published` boolean. One record per `(page-id, subject)`:
+Records are **exceptions to the default**. A page with no record uses the default policy. Matches the existing OmegaDB pattern where `folder-pkey` defaults to `[]` and page component defaults to `"Page"` when no record is written.
+
+One record per non-default page:
 
 ```
 {
-  "app-id":    <owning-workspace-id>,
-  "page-id":   <page-id>,
-  "subject":   "owner" | "group" | "other",
-  "modes":     "rwx" | "r-x" | "r--" | ...,
-  "scope":     "self"              ; v1 only writes self-scoped records.
-                                   ; a future "subtree" value could lazy-cascade.
+  "app-id":   <owning-workspace-id>,
+  "page-id":  <page-id>,
+  "mode":     "rwx------"          ; 9-char unix-literal string
+                                   ; positions: owner(3) group(3) other(3)
 }
 ```
 
-v1 writes two records per page:
+**Default when no record exists:** `"rwx------"` — workspace-private. Applied in the `Qo.Page/effective-policy!` resolver:
 
-- `{subject: "owner", modes: "rwx"}` — implicit today; make it explicit in the data model.
-- `{subject: "other", modes: "---"}` by default; flipped to `"r--"` on publish.
+```
+(:- (Qo.Page/effective-policy! AppId PageId Policy)
+    (if (Qo.Data.Page.Policy/policy AppId PageId Policy)
+      (= 1 1)
+      (= Policy "rwx------")))
+```
 
-The owner record is always present. The other record flips between `"---"` and `"r--"`. Group records are never written in v1 but the datastore shape accepts them.
+**No migration.** Existing pages stay untouched; their effective policy is the default. Only pages that are explicitly changed (published, restricted) gain a record. Scales cleanly to millions of pages.
 
-**Migration:** existing `Qo.Data.Page.Published` rows map to a `{subject: "other", modes: "r--"}` policy. Implemented as an idempotent migration script so `published` can be deprecated.
+**Back-compat with `published`:** the existing `Qo.Public.Api.Page/set-published!` wrapper maps `"true"` → writes mode `"rwx---r--"`, `"false"` → deletes the policy record (returns to default). The existing `published!` endpoint reads the effective policy's `other` bit and reports `"true"`/`"false"`. Nothing calling the old API breaks; it's just a thin alias.
+
+**Group slot** in the mode string (positions 4-6) is always `"---"` in v1. Reserved for future group grants.
 
 ### Cross-workspace search index
 
@@ -110,57 +116,57 @@ Keeping the index as a separate datastore (rather than querying `Qo.Data.Page.Po
 
 ## Public API (`Qo.Public.Api.Page`)
 
-The existing `set-published` / `published` endpoints are preserved as thin wrappers for back-compat (they map to `set-policy!` with `subject: "other"`, `modes: "r--"` or `"---"`). Nothing calling the old API breaks. The real surface becomes:
+Two new clauses; the existing `set-published` / `published` wrappers remain:
 
-- `set-policy!` — set modes for a `(page-id, subject)` pair.
-- `set-policy-recursive!` — same, but applied to page + all descendants in one transaction. Also writes to `Qo.Data.Page.WorldIndex` where modes include `other +r`.
-- `policy!` — read policies on a page. Returns empty / owner-only if caller can't see the page.
+- `perm!` — read a page's effective policy (from record or default).
+- `set-perm!` — write a policy record. Overwrites any prior record. Deleting the record (equivalent to restoring default) is either an explicit `clear-perm!` or passing the default mode; v1 just overwrites.
+- `set-perm-recursive!` — write the same policy to the target page and every descendant in one transaction. Flat write — no partial/additive application. Also updates `Qo.Data.Page.WorldIndex` for each affected page.
 - `search!` — query the world index by name + text, returns matching `{page-id, app-id, name}` tuples.
-- `read-world!` — read a page's blocks by `page-id` if the caller has access. Scoped to pages in the world index; doesn't need the caller to be in the owning workspace.
+
+**Cross-workspace read is not a new clause** — the existing `page-by-id!` and `page-blocks!` gain an inline permission check: if the caller's `AppId` is not the owning workspace, require `effective-policy[other] includes "r"`. If the page isn't readable, behave as if the page doesn't exist (Plan 9 invisibility, not 403).
 
 ### CLI surface (`qo`)
 
-Minimal, Unix-flavored:
+Unix-literal:
 
 | command | behavior |
 |---|---|
-| `qo publish <page>` | set `other +r` on the one page |
-| `qo publish -R <page>` | set `other +r` on the page + all descendants |
-| `qo unpublish <page>` | clear `other +r` on the one page |
-| `qo unpublish -R <page>` | clear `other +r` on page + all descendants |
+| `qo perm <page>` | print the page's effective policy (e.g. `rwx---r--`) |
+| `qo set-perm <page> <mode>` | write a policy record for the page. `<mode>` is the 9-char string (e.g. `rwx---r--`) or the subset of symbolic ops we choose to support (`o+r`, `o-r`) |
+| `qo set-perm -R <page> <mode>` | write the same policy to target + every descendant in one transaction. Flat write, no partial application |
 | `qo search <query>` | search across all world-visible pages in OmegaAI |
-| `qo read <page-id>` | read page blocks by direct page-id. Works across workspaces for pages with `other +r`; falls back to today's in-workspace path resolution when given a path. |
+| `qo read <page-id>` | read page blocks by direct page-id. Works across workspaces for pages with `other +r`; falls back to today's in-workspace path resolution when given a path |
 
 v1 keeps cross-workspace addressing to page-ids only. `qo search` returns `page-id` fields, so the natural flow is search → read. A future `workspace-slug/path` addressing form can land once workspaces have a stable slug field; deferred.
 
-A future `qo chmod` can land when modes beyond `other +r` become enforceable.
+**Publish as convention, not a verb.** "Publishing" a page in v1 is just `qo set-perm <page> rwx---r--` (or whatever symbolic form we support). No dedicated `qo publish` verb. The old `Qo.Public.Api.Page/set-published` wrapper stays for frontend back-compat; the CLI goes pure unix.
+
+Open choice on `<mode>` format: pick 9-char absolute only (simpler to parse, less ambiguous) vs. chmod-style (`o+r`, `u=rwx`, `755`). My lean for v1: absolute only. Symbolic ops can come later without breaking consumers.
 
 ## Agent rendering polish
 
-Independent of the permission model, three chat-side changes to make documentation navigation feel good:
+Two chat-side changes, both small. Knock them out first since they're trivial relative to the permission work:
 
-1. **Markdown rendering in agent text output.** Today agent responses render as plain text. Switch to a markdown renderer so headings, lists, code, and links format naturally.
+1. **Markdown rendering in agent text output.** Today agent responses render as plain text. Switch to a markdown renderer so headings, lists, code, and links format naturally. Claude already emits markdown by default; we just need the client to render it.
 
-2. **HTML-block rendering.** When `qo read` returns a block of type `HtmlPageBlock`, the chat currently shows raw HTML tags in the JSON. Two changes:
-   - Agent-side: convert HTML to markdown before passing to Claude (so the agent sees structured content, not tag soup).
-   - Client-side: if the agent emits HTML/markdown in a response, render it rather than showing raw.
+2. **Page context in the session system prompt.** The agent currently only knows the current `pageId` UUID. Pass at session start (and on page change): page name, path breadcrumbs, immediate siblings. Lets the agent answer "what page am I on?" without tool calls.
 
-3. **Page context in the session system prompt.** Today the agent only knows the current `pageId` UUID. Pass at session start (and on any page change): page name, path breadcrumbs, immediate siblings. The agent can answer "what page am I on?" without tool calls.
+No HTML preprocessing needed — Claude reads HTML fine and restates in markdown naturally.
 
-These changes are all in the agent service (`server.ts`) and the AI panel (`AiPanel*`, `events/TextBlock.tsx`). No new OQL or datastore changes.
+These changes are in the agent service (`server.ts`) and the AI panel (`events/TextBlock.tsx`). No new OQL or datastore changes.
 
 ## End-to-end flows
 
 ### Publishing the KB
 
 1. Ryan migrates `omega-knowledge-base` into an OmegaAI workspace (separate content-migration script; not in this spec).
-2. From that workspace: `qo publish -R /` — sets `other +r` on every page and writes world-index entries.
-3. Any other workspace's agent can now `qo search "descend from root"` and get back a result pointing at the KB. It can `qo read` the result.
+2. From that workspace: `qo set-perm -R / rwx---r--` — writes the policy on every page and updates world-index entries. Pages that had no prior policy record now get one.
+3. Any other workspace's agent can now `qo search "descend from root"` and get back a result pointing at the KB. It can `qo read <page-id>` to fetch.
 
 ### Sharing a single customer doc
 
 1. Redefine workspace writes `Data/Copy Strategy` page.
-2. `qo publish Data/Copy Strategy` — one page becomes world-readable.
+2. `qo set-perm "Data/Copy Strategy" rwx---r--` — one page becomes world-readable.
 3. Marc's workspace's agent, or the public web, can read that page without seeing the `Data` folder's other contents.
 
 ### Agent answering "what is MAB?"
@@ -175,7 +181,7 @@ These changes are all in the agent service (`server.ts`) and the AI panel (`AiPa
 
 - **Publishing a leaf in an unpublished folder.** By design: allowed. The leaf's name shows up in search; its path does not leak. A consumer opening the leaf sees the leaf's own breadcrumbs only as far as the published chain extends. We may want a UX warning on the first such publish ("This page will be world-visible but its parents are private. Breadcrumbs will be truncated.").
 
-- **Write cost at `qo publish -R` scale.** A KB with ~500 pages costs 500 + 500 write ops (policy + index). CouchDB handles batched writes, but this will be slower than a single-record flip. Acceptable for infrequent publish actions; worth measuring.
+- **Write cost at `qo set-perm -R` scale.** A KB with ~500 pages costs ~500 + 500 write ops (policy + index). CouchDB handles batched writes, but this will be slower than a single-record flip. Acceptable for infrequent actions; worth measuring once.
 
 - **`qo ls` cross-workspace.** Out of scope for v1 — you reach other workspaces via `qo search` or direct `qo read`. A cross-workspace `ls` would need a cross-workspace path-walker; deferred.
 
@@ -192,16 +198,18 @@ These changes are all in the agent service (`server.ts`) and the AI panel (`AiPa
 Phase 1 (this spec's implementation plan):
 
 - `Qo.Data.Page.Policy` + `Qo.Data.Page.WorldIndex` datastores
-- Migration from `Qo.Data.Page.Published`
-- `set-policy` / `set-policy-recursive` / `policy` / `search` / `read-world` OQL clauses
-- `qo publish` / `qo publish -R` / `qo unpublish` / `qo unpublish -R` / `qo search` / extended `qo read`
-- Agent rendering polish (markdown out, HTML-block conversion, page context in system prompt)
+- `Qo.Page/effective-policy!` resolver with default fallback
+- `set-perm!` / `set-perm-recursive!` / `perm!` / `search!` OQL clauses
+- Inline permission check in existing `page-by-id!` / `page-blocks!`
+- Back-compat: old `set-published!` / `published!` map to the new model
+- `qo perm` / `qo set-perm` / `qo set-perm -R` / `qo search` / extended `qo read`
+- Agent rendering polish: client-side markdown, page context in system prompt
 
 Phase 2 (follow-on):
 
 - Cross-workspace `qo ls`
-- UI surfaces in query-omega: publish/unpublish button on pages, cross-workspace search in the AI panel
-- Batch UX (publish warnings, publish-with-children confirmation)
+- UI surfaces in query-omega: permission controls on pages, cross-workspace search in the AI panel
+- Symbolic mode ops (`o+r`, `u=rwx`, `755`) in `qo set-perm` if the absolute-only form proves awkward
 
 Phase 3+:
 
@@ -212,12 +220,13 @@ Phase 3+:
 
 ## Testing
 
-- Policy migration round-trips the existing `Qo.Data.Page.Published` state.
-- `publish -R` on a 3-level folder writes `N` policy records and `N` world-index records, reads back correctly.
-- `unpublish -R` removes both.
-- `search` returns results only for currently-published pages; unpublished pages vanish from index immediately.
-- `read-world` from workspace A reads a published page in workspace B; fails cleanly for an unpublished one.
-- Agent end-to-end: from a non-owner workspace, `qo search` + `qo read` resolves to real content across workspaces.
+- `Qo.Page/effective-policy!` returns the default `"rwx------"` for pages with no record.
+- `set-perm!` writes a record; `effective-policy!` reflects it on next read.
+- `set-perm-recursive!` on a 3-level folder writes policy + world-index records for all affected pages.
+- Removing `other +r` by overwriting with a restricted policy clears the page from the world index.
+- Back-compat: `set-published! {published: "true"}` results in effective policy `"rwx---r--"`; `{published: "false"}` restores default.
+- Cross-workspace read: a caller in workspace A gets page-data for a published page in workspace B; gets page-not-found for an unpublished one (not a 403).
+- Agent end-to-end: from a non-owner workspace, `qo search` + `qo read <page-id>` resolves to real content across workspaces.
 
 ## Notes on what this is NOT
 
