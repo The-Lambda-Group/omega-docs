@@ -8,11 +8,12 @@ OQL development is REPL-driven. You build queries incrementally, one step at a t
 
 Before writing any OQL implementation, read:
 
+- [OQL hard rules](../reference/oql-hard-rules.md) — non-negotiable rules on forbidden datastores, forbidden operations, and the boolean-string requirement. Read this first.
 - [Execution model](../explanation/oql-execution-model.md) — how OQL evaluates queries (solution sets, why terms can't be nested inside literals)
 - [Built-in terms](../reference/built-ins.md) — the full built-in term reference
 - [Control flow](../reference/control-flow.md) — read this before writing any `when`, `when-not`, `if`, or `with-table-if`
 
-Skipping these leads to using non-existent terms, misusing `if` (universal, not per-row), and missing idiomatic patterns like using `(get Map "key" Val)` as a condition in `with-table-if` (the `get` itself fails on null/missing, so the else branch provides the default).
+Skipping these leads to violating the hard rules, using non-existent terms, misusing `if` (universal, not per-row), and missing idiomatic patterns like using `(get Map "key" Val)` as a condition in `with-table-if` (the `get` itself fails on null/missing, so the else branch provides the default).
 
 ## The workflow
 
