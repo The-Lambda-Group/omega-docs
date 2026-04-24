@@ -12,9 +12,17 @@ This bucket owns public OQL development workflows and coding patterns. Project-s
 
 ## Navigation map
 
-### OQL development
+### Methodology (read first)
 
-- [Develop OQL implementations](develop-oql-implementations.md) -- The core development workflow. Covers the incremental REPL-driven push-run cycle (`qo push && qo run`), the rule of adding one transformation at a time, never rewriting a working file, avoiding side effects until logic is verified, and the one-clause-one-concern discipline. Start here if you are writing OQL for the first time. Keywords: push-run, incremental, REPL, qo push, qo run, workflow, dry-run, write-table verification.
+These two docs are the cross-cutting methodology for OQL work -- one for authoring, one for triage. They are not peers of task-specific how-tos; they describe the loop every OQL session runs. Read both before descending further.
+
+- [Develop OQL implementations](develop-oql-implementations.md) -- The authoring mirror. The incremental REPL-driven push-run cycle (`qo push && qo run`), one transformation at a time, never rewrite a working file, dry-run side effects. Read this when you are writing new OQL or adding to existing OQL. Keywords: push-run, incremental, REPL, workflow, dry-run, write-table verification.
+
+- [Narrow an OQL failure](narrow-an-oql-failure.md) -- The triage mirror. Six rules that produce artifacts (min repro, ruled-in/out layer list, Observed/Hypothesis/Test trio) for diagnosing a failing query without pattern-matching a non-fix. Covers stack-frame-as-address-not-diagnosis, prior-bug-as-hypothesis-not-conclusion, discipline-decay-under-momentum. Read this when any OQL is misbehaving -- Mango throw, `omega/query/full-scan`, `WRITING_SYMBOLS`, no-return, bare 500, unexpected result, slow-but-correct. Keywords: debug, triage, Mango, full-scan, failure, minimum reproduction, min repro, narrow, bisect, diagnosis, WRITING_SYMBOLS, postmortem.
+
+---
+
+### OQL development
 
 - [Debug by returning early](debug-by-returning-early.md) -- How to bisect a broken query by commenting out clauses and binding `Result` to a tuple of intermediate variables. Covers why tuples are better than `throw` (multi-row visibility), the HTTP debugging sub-recipe (inspecting request maps alongside responses to catch symbol-leak bugs), and iteration discipline (one change per run, include per-row identity). Keywords: debug, bisect, early return, tuple, throw vs tuple, HTTP debugging, intermediate state, comment out.
 

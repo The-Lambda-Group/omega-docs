@@ -4,6 +4,13 @@
 
 Public documentation for the [Omega](https://github.com/The-Lambda-Group) platform, organized as a Diataxis tree. Every top-level bucket indexes its own entries -- start here, then descend into the bucket that matches your question type.
 
+## Methodology (read first)
+
+Two cross-cutting docs encode the OQL loop. They are methodology, not peers of task-specific how-tos -- read them before descending into the buckets below:
+
+- [how-to/develop-oql-implementations.md](how-to/develop-oql-implementations.md) -- The authoring loop. Push -> run -> verify, one transformation at a time. Read before writing any OQL.
+- [how-to/narrow-an-oql-failure.md](how-to/narrow-an-oql-failure.md) -- The triage loop (the authoring loop in reverse). Six artifact-producing rules for diagnosing a failing query without shipping a pattern-matched non-fix. Read before debugging any OQL failure (Mango, `full-scan`, `WRITING_SYMBOLS`, no-return, slow-but-correct).
+
 ## Navigation map
 
 | Bucket | Question type | What you will find |
