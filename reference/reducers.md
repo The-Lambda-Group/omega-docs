@@ -99,6 +99,14 @@ Counts solutions matching a term:
 (with-count Total (Qo.Db.Prop/prop-vals FolderId _ _))  ;; Total = row count
 ```
 
+## Performance: partitions and `run-term`
+
+`fold` / `with-group-by` / `with-order-by` scale poorly when the solution table contains many distinct group-key values ("partitions"). Per-partition bookkeeping compounds non-linearly with partition count, so a query that iterates N keys and folds per key can be orders of magnitude slower than the underlying term read would suggest.
+
+The idiomatic workaround is to **establish the partition boundary before folding**: wrap the reducer body in a clause and invoke it once per key via `run-term`. Each invocation's solution is single-partition, so the reducer chain runs against only that partition's rows.
+
+Measured 2026-04-24 for a 21-page pull: 8.3s with a top-level `with-group-by [PageId]`, 0.5s when the same reducer body was called via `run-term` per page. See [query-omega-oql/docs/explanation/fold-partition-scaling.md](../../query-omega-oql/docs/explanation/fold-partition-scaling.md) for the full explanation and canonical SLOW/FAST pattern.
+
 ## fold pitfalls
 
 ### fold is solution-wide, not per-row
