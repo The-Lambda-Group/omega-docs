@@ -28,6 +28,8 @@ These two docs are the cross-cutting methodology for OQL work -- one for authori
 
 - [Write scratch queries](write-scratch-queries.md) -- Scratch queries (bare term sequences run with `qo run` or `qo query`) require an explicit `(return [Result])` as the last line. Without it, the API returns a bare HTTP 500 with no diagnostics. This doc explains why the 500 is hard to debug and what to check first. Keywords: scratch query, return, bare 500, no error message, structurally incomplete.
 
+- [Triage `omega/query/no-return`](triage-no-return.md) -- No-return has two distinct modes: scratch-file (missing `(return [Result])`) and dispatch-layer (caller `-a` arity does not match protocol spec arity, wrong Clauses-map keys, or malformed protocol spec). The `:failed-at nil` signal in the trace distinguishes dispatch-layer from body-level failures. Read this when no-return surfaces from a `qo run` against a stored impl (or any `Qo.Public.Api.Run/*` caller) -- the "add a return statement" advice does not apply because the impl is a clause. Keywords: no-return, dispatch, arity, Clauses map, protocol spec, failed-at nil, silent zero solutions, qo run.
+
 - [Test at realistic batch sizes](test-at-realistic-batch-sizes.md) -- Why `limit=1` testing masks bugs that only appear at production batch sizes. Covers which OQL constructs are batch-size-dependent (`with-table-if` schema collapse, `fold` over unique values, mixed-literal symbols, non-2xx HTTP responses), and a diagnostic sequence for isolating batch-size bugs. Keywords: batch size, limit, production testing, schema collapse, fold pitfall, 422.
 
 ### OQL patterns

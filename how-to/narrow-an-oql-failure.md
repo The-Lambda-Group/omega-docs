@@ -173,6 +173,7 @@ Shrinking the frame (rule 2) plus a min repro (rule 1) localised the culprit to 
 
 - [Debug by returning early](debug-by-returning-early.md) -- how to bind `Result` to a tuple of intermediate variables to see per-solution state. Use when the min repro reproduces but you need to see what the data looks like mid-pipeline.
 - [Write scratch queries](write-scratch-queries.md) -- scratch queries need `(return [Result])` or they produce a bare 500. Relevant because min-repro scratch files fall into this category.
+- [Triage `omega/query/no-return`](triage-no-return.md) -- the no-return error has two distinct modes (scratch-file missing return vs dispatch-layer arity / Clauses-map mismatch). Read this if you hit no-return on a dispatched call (`qo run` against a stored impl) -- adding `(return [...])` will not help because the impl is a clause, not a scratch file.
 - [Test at realistic batch sizes](test-at-realistic-batch-sizes.md) -- some bugs only appear at non-trivial batch sizes. If your min repro at `limit=1` works but the full run fails, scale the repro up before concluding anything.
 - [Drop rows with forced unification failure](drop-rows-with-forced-unification-failure.md) and [Handle HTTP 422 in dispatch](handle-http-422-in-dispatch.md) -- common shapes of `WRITING_SYMBOLS` triage.
 
