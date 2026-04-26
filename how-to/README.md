@@ -8,7 +8,7 @@ Task recipes for working with Omega. Each entry is a step-by-step guide to accom
 
 ## Information ownership
 
-This bucket owns public OQL development workflows and coding patterns. Project-specific how-to docs (e.g., CLI usage, MCP server setup) live in their respective project repos. Private operational procedures live in `omega-knowledge-base`.
+This bucket owns the **public OQL authoring methodology** (the push-run loop), **OQL failure triage methodology**, and **language-level coding patterns** for the public OQL surface (early-return debugging, scratch query structure, batch-size discipline, row-drop idioms, HTTP dispatch handling). It does not own deployment, CLI usage, MCP server setup, component-implementation authoring beyond the language layer, or any project-specific operational procedure — those live in their respective project repos. Private operational procedures live in `omega-knowledge-base`.
 
 ## Navigation map
 

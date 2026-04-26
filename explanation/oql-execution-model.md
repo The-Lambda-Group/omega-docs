@@ -113,7 +113,7 @@ A clause call acts as a **solution boundary**. When you call a clause:
 2. The clause body executes with a fresh solution
 3. Only the head arguments (output) come back
 
-This is why `def-query` and `(:- ...)` clauses are the primary tool for keeping solutions small:
+In-memory clauses (`(:- (Name ...) ...)`) are the primary tool for keeping solutions small. Lift any block of work whose intermediates you don't want leaking into the outer solution into a named clause and call it:
 
 ```oql
 ;; BAD: all intermediate symbols accumulate in the solution
@@ -123,17 +123,19 @@ This is why `def-query` and `(:- ...)` clauses are the primary tool for keeping 
 (get PV "agent_full_name" Name)
 (get PV "closed_sales" RawSales)
 
-;; GOOD: def-query swallows intermediate symbols
-(def-query GetFieldsQ [FolderId RowPageId Link Name RawSales]
-  (Qo.Db.Prop/prop-vals FolderId RowPageId PropVals)
-  (get PropVals "prop-vals" PV)
-  (get PV "agent_profile_link" Link)
-  (get PV "agent_full_name" Name)
-  (get PV "closed_sales" RawSales))
+;; GOOD: an in-memory clause swallows intermediate symbols
+(:- (GetFields FolderId RowPageId Link Name RawSales)
+    (Qo.Db.Prop/prop-vals FolderId RowPageId PropVals)
+    (get PropVals "prop-vals" PV)
+    (get PV "agent_profile_link" Link)
+    (get PV "agent_full_name" Name)
+    (get PV "closed_sales" RawSales))
 
 ;; Only FolderId, RowPageId, Link, Name, RawSales exist in the outer solution
-(with-query GetFieldsQ)
+(GetFields FolderId RowPageId Link Name RawSales)
 ```
+
+> **Deprecated: `def-query` / `with-query`.** Older code uses `(def-query Q [...] body)` + `(with-query Q)` to scope intermediates the same way. **Do not use these constructs in new code.** They were the original mechanism for conditional logic before `with-table-if` existed and were also used to work around several engine performance problems that have all since been addressed. Both motivations are obsolete, and using them in a stored implementation invoked via dispatch causes silent `no-return` failures that are painful to diagnose. Use `with-table-if` for conditionals; use inline terms or in-memory `(:- ...)` clauses for scoping and composition.
 
 ## Clause Types
 
@@ -151,7 +153,7 @@ Written to a datastore. The `!` suffix means "store this clause." Available for 
 
 ### In-Memory Clauses (`(:- (Name ...) ...)`)
 
-No namespace prefix, no `!`. Lives only in the current query execution. Used for helper logic within an implementation.
+No namespace prefix, no `!`. Lives only in the current query execution. Used for helper logic within an implementation, and as the canonical scoping primitive — call the clause where you'd otherwise inline a block of terms, and only the head arguments cross the boundary.
 
 ```oql
 ;; Exists only during this query — not stored anywhere
@@ -162,20 +164,7 @@ No namespace prefix, no `!`. Lives only in the current query execution. Used for
       (json-stringify Sales RawSales)))
 ```
 
-### def-query
-
-Defines an inline query within a clause body. Acts as a solution boundary — intermediate symbols don't leak out.
-
-```oql
-(def-query MyQ [InputVar OutputVar]
-  ;; These symbols are scoped to this def-query
-  (some-term InputVar Intermediate)
-  (other-term Intermediate OutputVar))
-
-;; Bring results into the outer solution
-(with-query MyQ)
-;; Only InputVar and OutputVar are in scope here
-```
+> **Deprecated: `def-query` / `with-query`.** OQL also has a `(def-query Q [...] body)` + `(with-query Q)` form that defines an inline scoped query. **Do not use these in new code** — see the deprecation note under [Clauses as Solution Boundaries](#clauses-as-solution-boundaries). Use an in-memory `(:- ...)` clause instead.
 
 ## Control Flow Reference
 
@@ -341,8 +330,8 @@ The key to writing efficient OQL is keeping solution sets small at each step. Ev
 
 **Rules of thumb:**
 
-1. **Use def-query for row processing** — each row should go through a clause boundary so intermediate symbols don't accumulate
-2. **Linear lookups don't need def-query** — page tree walks, config reads produce one result each
+1. **Use in-memory clauses for row processing** — each row should go through a clause boundary (an in-memory `(:- ...)` clause) so intermediate symbols don't accumulate. Do **not** use `def-query` / `with-query` — they are deprecated; see [Clauses as Solution Boundaries](#clauses-as-solution-boundaries)
+2. **Linear lookups don't need a clause boundary** — page tree walks and config reads produce one result each, so inlining is fine
 3. **fold early** — once you have the values you need per row, fold into a list before doing more work
 4. **Match indexes exactly** — extra bound variables trigger full table scans that can crash the DB
 5. **Don't nest with-table-if deeply** — each level adds complexity to the solution table. Prefer flat `when` blocks or separate clauses
