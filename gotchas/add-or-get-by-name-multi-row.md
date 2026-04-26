@@ -26,7 +26,7 @@ The clause body (`query-omega-api/oql/app/public/oql-api/page/block/html.oql`) u
 
 `when-not` is a **universal quantifier over the current solution set**. The body fires only if the guard condition fails for **every** solution row. If the guard succeeds for even one row — because one `PageId` in the set happens to have a pre-existing block with the matching type and name — the body is skipped for **all** rows. `Block` is then bound, via the guard's `(Qo.Page.Bl/page-block _ PageId _ Block)` read, to the pre-existing block — and that single binding is shared across every row.
 
-This compounds the `uuid` sharing described in [run-term forces a fresh solution per row; call does not](run-term-vs-call-per-row.md): even when the body does fire, a single-solution invocation would give every row the same `BlockId`. `when-not` adds a second failure mode on top — a guard that succeeds for one row suppresses creation for all rows.
+This compounds the `uuid` sharing described in [`call` vs `run-term` when invoking a captured helper](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) (per-row freshness section): even when the body does fire, a single-solution invocation would give every row the same `BlockId`. `when-not` adds a second failure mode on top — a guard that succeeds for one row suppresses creation for all rows.
 
 Both failure modes have the same root cause: clause invocations that span multiple rows execute once against the full solution set, not N times against N single-row solutions.
 
@@ -62,7 +62,7 @@ If you are calling a public clause that performs a create-if-missing pattern acr
 
 ## Related
 
-- [run-term forces a fresh solution per row; call does not](run-term-vs-call-per-row.md) — the underlying clause-boundary semantics and why `run-term` is the fix for per-row identity. Read this first for the general principle; this doc adds the `when`/`when-not` universal-quantifier dimension.
+- [`call` vs `run-term` when invoking a captured helper](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the underlying clause-boundary semantics and why `run-term` is the fix for per-row identity (per-row freshness section). Also covers the captured-orchestrator silent-no-return rule and the partition-before-fold pattern. Read this first for the general principle; this doc adds the `when`/`when-not` universal-quantifier dimension on top.
 - [run-term does not work on in-memory clauses](run-term-in-memory-clause.md) — `run-term` requires a stored functor. The helper clause must be stored.
 - [OQL Execution Model — when / when-not](../explanation/oql-execution-model.md#when--when-not) — control-flow semantics of the conditional guards.
 - [OQL Execution Model — Clauses as Solution Boundaries](../explanation/oql-execution-model.md#clauses-as-solution-boundaries) — why clause invocations share a solution and what that implies for bindings.

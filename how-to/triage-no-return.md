@@ -77,6 +77,12 @@ For the structure of an impl `.oql` file (datastore declarations, clause definit
 
 Verify the impl is on the page you think it is. `qo describe <page-id>` should list it. If `qo push` did not commit the implementation (e.g. the push itself errored on the file-level return -- see [Write scratch queries](write-scratch-queries.md)), the dispatcher has no clause to call.
 
+#### 5. `(call CapturedHelper ...)` from inside a captured orchestrator clause body
+
+If the orchestrator clause head declares `{"capture" [Helper1 Helper2 ...]}` and the body invokes any captured helper via `(call ...)`, dispatch silently fails — the orchestrator returns no-return with `:failed-at nil` and no helper body runs. The fix is to use `(run-term CapturedHelper ...)` for every captured-helper invocation. Checks 1–4 will all pass for this case; the only signal is that swapping `call` → `run-term` flips the orchestrator from no-return to working.
+
+For the mechanism and a worked diff (MAB Seed adapter, 2026-04-26), see [query-omega-oql/docs/explanation/call-vs-run-term-on-captured-helpers.md](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md). For why all five causes share the `:failed-at nil` signature and have no JVM trace, see [omega-db/docs/explanation/dispatch-layer-no-stack-trace.md](https://github.com/The-Lambda-Group/omega-db/blob/master/docs/explanation/dispatch-layer-no-stack-trace.md).
+
 ## Worked example
 
 ```bash
@@ -117,3 +123,5 @@ If your `:failed-at` is **not** nil -- it has frames -- the body did run and the
 - [Write scratch queries](write-scratch-queries.md) -- the scratch-file mode of no-return (missing `(return [Result])`).
 - [Debug by returning early](debug-by-returning-early.md) -- body-level no-return triage when `:failed-at` is non-nil.
 - [reading-oql-stack-traces](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/reference/reading-oql-stack-traces.md) -- the `:failed-at` frame structure and the bound-vs-free convention for reading dispatch-side traces.
+- [call-vs-run-term-on-captured-helpers](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) -- the fifth dispatch-layer cause: `(call CapturedHelper ...)` from a captured orchestrator silently fails; must be `(run-term ...)`.
+- [dispatch-layer-no-stack-trace](https://github.com/The-Lambda-Group/omega-db/blob/master/docs/explanation/dispatch-layer-no-stack-trace.md) -- engine-side companion: why all dispatch-layer failures share `:failed-at nil` and have no JVM trace.
