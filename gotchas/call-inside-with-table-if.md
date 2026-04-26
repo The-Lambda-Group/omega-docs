@@ -27,3 +27,9 @@ For iterative accumulation patterns, avoid calling in-memory clauses inside `wit
 ## Status
 
 Open — needs investigation in omega-db REPL to determine whether it's a performance issue or a correctness bug.
+
+## Related
+
+- [Clauses — In-Memory Clauses](../reference/clauses.md#in-memory-clauses-bound-to-a-symbol) — the language-reference home for in-memory clauses (the kind invoked by `call`). Defines the `(:- ...)` and `clause` term forms that produce `call`-able symbols.
+- [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — when the in-memory clause needs an outer-scope binding, capture is the syntax. Includes the warning about known edge cases with capturing clauses inside other captured clauses, which is relevant if you are nesting `call`s of captured helpers.
+- [with-table-if header must include captured clause symbols](with-table-if-capture-header.md) — the scope-boundary rule: a captured clause symbol invoked inside `with-table-if` must appear in the header.
