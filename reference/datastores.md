@@ -37,6 +37,8 @@ When you write `(Qo.Page/page-object _ _ PageId Page)`, this is syntactic sugar 
 
 `defterm` declares a term schema on a datastore — it defines what terms look like and which arguments are the primary key. This creates the necessary CouchDB indexes for efficient lookups.
 
+> **Read [defterm.md](defterm.md) before adding a defterm to a term that already has data.** A `defterm` is **not** required — many terms have no defterm, and that is the normal default state. Adding one to a term with existing rows is a **destructive rekey**, not an additive index: the row-id derivation changes from CouchDB-assigned to `id_<sha256(pkey)>`, the existing rows do not move, and they become unreachable through pkey lookups. Treat declaring a defterm on populated data as a separate data-migration project, not a one-line deploy.
+
 ```oql
 (datastore Qo.Data.LogStream "omega/query-omega/data/log-stream")
 
