@@ -29,3 +29,8 @@ Add the clause symbol to the `with-table-if` header array:
 ## General Rule
 
 Any symbol you reference inside a `with-table-if` branch — whether it is a data variable or a clause symbol — must appear in the header array. This applies to all captured values, not just clause symbols. The header defines the scope boundary.
+
+## Related
+
+- [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — the language-reference home for capture semantics. Explains the `{"capture" [...]}` signature syntax for threading outer-scope bindings (including clause symbols) into a clause body, and the warning about known edge cases with capturing clauses inside other captured clauses. The `with-table-if` header rule documented here is one specific manifestation of the broader "captured symbols must be made available at the scope boundary" pattern.
+- [Lexical scope — Capture Only Works With call](lexical-scope.md#capture-only-works-with-call) — the dual rule on the invocation side: a captured clause symbol must be invoked with `call`, not as a bare functor.
