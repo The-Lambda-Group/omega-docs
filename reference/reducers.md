@@ -93,11 +93,13 @@ Partitions solutions into groups. Inside the body, `fold` operates per-group:
 
 ## with-count
 
-Counts solutions matching a term:
+Counts solutions matching a term. Always produces exactly one solution row binding the count — including `0` when the term matches nothing. This makes it the building block for empty-handling around `fold` (see "fold over zero solutions does not bind its accumulator" below).
 
 ```oql
 (with-count Total (Qo.Db.Prop/prop-vals FolderId _ _))  ;; Total = row count
 ```
+
+**Restrict the inner term to a single call.** `with-count` over a compound condition — `(with-count Cnt (and Term1 Term2))` — currently fails with a `NullPointerException`. If you need to count rows matching a compound predicate, wrap the predicate in an in-memory clause and count over the clause invocation. See the "fold over zero solutions" section below for the full pattern.
 
 ## Performance: partitions and `run-term`
 
@@ -165,6 +167,65 @@ Or count rows directly with a literal `1` instead of a column:
 ### Why batch=1 masks fold bugs
 
 With one row in the solution, "all rows" and "this row" are the same set. The fold accumulator contains exactly one row's values, so the output looks correct. Both fold pitfalls only surface when the batch contains two or more rows.
+
+### fold over zero solutions does not bind its accumulator
+
+`fold` only produces an output binding when its upstream term produces at least one solution. If the upstream has zero solutions, `(fold Init Sym Func Agg)` does **not** bind `Agg` to `Init` — it does not bind `Agg` at all. The `Init` value is the *seed for the reduction*, not a default for the empty case.
+
+This is the most common cause of a downstream `omega/query/no-return` error in queries that look correct on the happy path:
+
+```oql
+;; If no pages match the sec-index lookup, AllPids is unbound,
+;; so the (return [AllPids]) at the bottom of the query has nothing to return.
+(Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" Pid)
+(fold [] Pid append AllPids)
+(return [AllPids])
+```
+
+The fold succeeds silently in the sense that no error fires *at* the fold — the failure manifests further down the query when something tries to read the unbound `Agg` symbol. The error surface point misleads agents into checking the `(return ...)` instead of the upstream cardinality.
+
+#### The canonical fold-with-default idiom
+
+Use `with-count` to materialize the upstream cardinality into a single-row solution, then branch on the count with `with-table-if`. The then-branch runs the real query and folds; the else-branch binds the accumulator to the empty default explicitly:
+
+```oql
+;; Want: AllPids = list of matching Pids, or [] if none match.
+(with-count Cnt (Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" _))
+(with-table-if (> Cnt 0)
+  [FolderId AllPids]
+  (and (Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" Pid)
+       (fold [] Pid append AllPids))
+  (= AllPids []))
+;; AllPids is now bound on every downstream row, regardless of cardinality.
+```
+
+Why this works:
+
+- `with-count` always produces exactly one solution — even when the inner term matches nothing — and binds `Cnt` (to `0` in the empty case).
+- That one-row solution is what flows into `with-table-if`. Both branches have a row to operate on.
+- The then-branch re-runs the upstream term as a real reader, so `fold` sees the actual N solutions and reduces them.
+- The else-branch never runs the term — it just binds `AllPids` to the seed value directly.
+
+The schema header on `with-table-if` must include `AllPids` (so it survives the merge) and a per-row identity column from the parent solution (here `FolderId` — see "Preserving per-row identity" in [control-flow.md](control-flow.md) for the full rule). Schemas missing the identity column collapse rows in the multi-row caller case.
+
+#### Why the obvious workarounds don't work
+
+- **Naked `with-table-if (sec-index ...)`** — the condition runs per parent row, but if the parent solution itself has zero rows entering, the with-table-if has nothing to branch on and nothing comes out. Use `with-count` first so there is always exactly one row to branch.
+- **`(if (> Cnt 0) ...)`** — `if` is a universal quantifier (see [control-flow.md](control-flow.md)), not a per-row branch, and it does not bind variables across both arms. Use `with-table-if`.
+- **`with-count` over a compound condition** — `(with-count Cnt (and Term1 Term2))` currently fails with a `NullPointerException`. Restrict the term inside `with-count` to a single call. If you need to count rows matching a compound predicate, push the compound logic into a `(:- ...)` in-memory clause and invoke that clause inside `with-count`:
+
+    ```oql
+    ;; BAD — NPE
+    (with-count Cnt (and (sec-index F "k" "v" Pid)
+                         (Qo.Page/page-object _ _ Pid _)))
+
+    ;; GOOD — wrap the compound predicate in an in-memory clause
+    (:- (Match F Pid)
+        (and (Qo.Public.OqlApi.Db.Prop/sec-index F "k" "v" Pid)
+             (Qo.Page/page-object _ _ Pid _)))
+    (with-count Cnt (Match FolderId _))
+    ```
+- **Counting all rows in the folder, then gating** — works if the folder is entirely empty but does not help when the folder has rows for *other* values that get filtered out by the lookup. The count must measure the same predicate the fold will reduce over.
 
 ## with-limit
 
