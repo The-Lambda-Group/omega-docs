@@ -130,3 +130,12 @@ This is the recommended workaround when you need a stored clause's result availa
 ```
 
 **Warning:** Capture is experimental. There are known edge cases with capturing clauses inside other captured clauses. Keep capture usage flat — avoid nesting captured clauses.
+
+### Related gotchas
+
+The capture mechanism interacts with several scoping and invocation rules documented in the gotchas tree. If you are diagnosing a runtime error that may originate in capture semantics, scan these:
+
+- [Lexical scope](../gotchas/lexical-scope.md) — what survives into a clause body, the push-time vs runtime scope split, and the "Capture Only Works With call" rule (a captured clause symbol must be invoked with `call`, not as a bare functor reference).
+- [with-table-if header must include captured clause symbols](../gotchas/with-table-if-capture-header.md) — the per-branch scope-boundary corollary: even after capture has threaded a clause symbol into the surrounding clause body, a `with-table-if` branch needs that symbol listed in its header to see it.
+- [add-or-get-by-name binds the same block across multiple solution rows](../gotchas/add-or-get-by-name-multi-row.md) — when the fix is "wrap in a stored helper invoked via `run-term`," capture is how you hand the helper the bindings it needs from the surrounding scope.
+- [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) — capture targets must be stored functors when reached via `run-term`. Define the stored clause at the top level, build a functor, and capture the functor.
