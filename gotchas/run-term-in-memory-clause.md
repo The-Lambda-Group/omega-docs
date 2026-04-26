@@ -31,3 +31,9 @@ Use `call` instead. `call` is designed for in-memory clause invocation:
 | `call` | In-memory clauses (symbols bound in the solution table) |
 | `run-term` | Functor objects from datastores |
 | `run-page` | Invoking a full page by ID through the public API |
+
+## Related
+
+- [Clauses — Stored vs In-Memory](../reference/clauses.md#in-memory-clauses-bound-to-a-symbol) — the language-reference distinction between stored clauses (callable by `run-term`) and in-memory clauses (callable by `call`).
+- [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — when the helper must be a stored clause for `run-term` to find it but the body still needs an outer-scope binding, capture is the bridge: define the stored clause at the top level, build a functor, and capture the functor into the implementation clause that calls it.
+- [`call` vs `run-term` solution scoping](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the deeper explanation of when each term is structurally required (per-row freshness, partition-before-fold) vs interchangeable.
