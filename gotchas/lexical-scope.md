@@ -118,3 +118,8 @@ Underscore `_` is special — it's always excluded from renaming and acts as a w
 3. **Expecting functor results to persist across clauses** — use `call` for explicit passing
 4. **Binding extra variables in index queries** — triggers full table scan instead of index lookup
 5. **Using `println-stream` before binding `Result`** — corrupts the solution context; always bind your result first
+
+## Related
+
+- [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — the language-reference home for the `{"capture" [...]}` signature syntax. Read this when the "Capture Only Works With call" section above tells you to use `call`, but you also need to declare *which* outer-scope symbols the clause body should see. Includes the warning about known edge cases with capturing clauses inside other captured clauses — keep capture flat.
+- [with-table-if header must include captured clause symbols](with-table-if-capture-header.md) — the per-branch scope-boundary corollary: even after capture has threaded a symbol into the clause, a `with-table-if` branch needs that symbol listed in its header to see it.
