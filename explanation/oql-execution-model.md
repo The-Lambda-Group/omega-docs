@@ -308,6 +308,51 @@ When an event subscription handler fires, it creates a **fresh context** — it 
 
 This means you cannot pass runtime state through subscriptions — only through the event data payload.
 
+### Calling OQL from Clojure: `run-query-clj` Returns `[result ctx]`
+
+When you invoke OQL from Clojure (rather than via the CLI, MCP, or HTTP API), the entry point is `omega-db.run/run-query-clj`. It returns a **two-element vector** `[result ctx]`:
+
+- `result` — whatever the last term produced. Usually `nil` for write-only queries; a value for read queries that bind a variable into the trailing position; whatever `(return [...])` produced for scratch-file-style queries.
+- `ctx` — the query context after evaluation, including the solution table, accumulated `:failed-at` frames, and any other engine state.
+
+The call chain (per [`src/omega_db/run.clj`](https://github.com/The-Lambda-Group/omega-db/blob/master/src/omega_db/run.clj) lines 55-67):
+
+1. `wr/clj->exps` — convert the raw Clojure form into Omega expression objects
+2. `interpreter/interpret-query` — wrap the expressions for the interpreter
+3. `run-exp` — evaluate against the supplied (or freshly-constructed) context, catching exceptions and attaching `:failed-at` frames
+
+```clojure
+(require '[omega-db.run :as run])
+
+(let [[result ctx] (run/run-query-clj
+                     '((Qo.Page/page-object _ FolderId _ Page)
+                       (return [Page])))]
+  ;; result is the bound (return ...) value
+  ;; ctx contains the full solution table
+  result)
+```
+
+**Gotcha: `(some? (run/run-query-clj q))` is always true.** The return value is a vector, and a non-empty vector is non-nil — even when the query produced zero solutions, threw a caught error, or wrote nothing. This is a tautological assertion that proves the function returned, not that the query succeeded.
+
+```clojure
+;; WRONG — this passes even when the query is a no-op or fails internally
+(is (some? (run/run-query-clj '((MyDs/init)))))
+
+;; BETTER — be honest that you only pinned "didn't throw"
+(is (vector? (run/run-query-clj '((MyDs/init)))))
+
+;; BEST — destructure and assert on what the query is supposed to produce
+(let [[result _ctx] (run/run-query-clj '((MyDs/get-thing "id" Thing) (return [Thing])))]
+  (is (= expected-thing result)))
+
+;; ALSO GOOD — run a follow-up query whose success depends on the first
+(run/run-query-clj '((MyDs/init)))
+(let [[result _ctx] (run/run-query-clj '((MyDs/get-thing "id" Thing) (return [Thing])))]
+  (is (some? result)))
+```
+
+For queries that should fail, assert on the thrown exception class rather than on the return value — the `:failed-at` frames live in the exception's `ex-data`, not in the returned `ctx`. See [reading-oql-stack-traces](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/reference/reading-oql-stack-traces.md) for the `:failed-at` frame structure, and [dispatch-layer-no-stack-trace](https://github.com/The-Lambda-Group/omega-db/blob/master/docs/explanation/dispatch-layer-no-stack-trace.md) for the engine-side framing of why `:failed-at nil` does not mean "succeeded."
+
 ### println-stream Corrupts Solution Context
 
 `println-stream` has a side effect: it modifies the solution context. If you call `println-stream` before binding your `Result` symbol, the solution context may be corrupted and `Result` becomes unresolvable.
