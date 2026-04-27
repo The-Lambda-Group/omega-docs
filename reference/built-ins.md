@@ -2,6 +2,19 @@
 
 # Built-in Terms
 
+## Primitives that look like they should exist but don't
+
+OQL's built-in inventory is smaller than Clojure's or Common Lisp's. Several primitives that agents reach for by training default are not implemented. They will fail at runtime with no hint that a workaround exists. This section is the negative-space companion to the positive lists below — check here first when a name "feels obvious."
+
+| Name agents reach for | Status | Canonical workaround |
+|---|---|---|
+| `string-length` | Does not exist. | No primitive returns string length. To inspect a string, bind it directly into Result and let the caller read it. There is no length-of-string operator. |
+| `string-take` / `string-substr` / `substring` | None exist. | The string toolkit is exactly: `string-split`, `string-concat` (binary — chain calls), `string-contains`, `string-replace`, `re-find`, `json-stringify` (bidirectional). Slicing a string by index is not supported; use `string-split` on a delimiter or `re-find` on a regex pattern instead. |
+| `keys` | Does not exist. | Use the K-binding-then-fold idiom: `(get Map K _) (fold [] K append KeysList) (length KeysList Count)`. Each `(get Map K _)` enumerates keys non-deterministically across the solution table; `fold` collects them. |
+| `assoc` (as a fold reducer) | Does not exist. | When folding into a map, use `append` with key-value pair entries (the Enumerate `IntoSet` pattern): `(= Entry [El El]) (fold {} Entry append Set)`. The `append` reducer accepts pair entries when the seed is `{}`. |
+
+If you find another "obvious" name that doesn't exist, add it here rather than letting the next agent rediscover it the hard way.
+
 ## Core
 
 ```oql
