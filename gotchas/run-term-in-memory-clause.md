@@ -2,6 +2,22 @@
 
 # run-term Does Not Work on In-Memory Clauses
 
+## The Rule
+
+**For in-memory captured-helper invocations: use `call` by default. `run-term` is appropriate ONLY when it is replacing `with-group-by` — i.e., the canonical partition-before-fold scaling pattern.**
+
+In every other context (one-solution-in / one-solution-out helpers, list-mapping helpers, validation helpers, transformation helpers, etc.), `(run-term ...)` against an in-memory captured helper is wrong. The hard failure mode is a 500 (described below). The softer, more dangerous failure mode is engine spin-out / `ECONNRESET` — a malformed `run-term` invocation that the engine cannot resolve cleanly can stall the database and require a restart.
+
+If you are not replacing a `with-group-by`, you are not in the exception. Use `call`.
+
+The reasoning chain: `run-term` runs its target as a separate execution against a fresh solution. That is mechanically what makes the partition-before-fold pattern fast (each invocation sees only one partition's rows). Per-row freshness — the other valid `run-term` use case discussed in [`call` vs `run-term` — solution scoping, freshness, and partition-before-fold](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — requires a **stored** helper, not an in-memory captured one. So inside the captured-helper world, the partition replacement is the only valid `run-term` shape.
+
+## Why agents get this wrong
+
+Working impls in the codebase (e.g., the Manager page's `SortedConcat` / `SortInPartition` helpers, `BuildCrossProduct`'s sorted-concat) use `run-term` legitimately because they are replacing a `with-group-by`. An agent reading those impls and pattern-matching on "this codebase uses run-term for helpers" will conclude `run-term` is a general-purpose alternative to `call`. It is not. Every `run-term` you see in a working impl is doing partition replacement; if your helper is not doing that, copying the form will spin the engine out.
+
+Concrete trigger that motivated this section (2026-04-27): a list-conversion helper (`CombinedList → list of JSON-stringified treatment_ids`) was invoked via `(run-term TupleListToTreatmentIds CombinedList TargetIds)`. The helper is one-solution-in / one-solution-out — exactly the case where `call` is correct. Result: ECONNRESET, engine spun out, database restart required.
+
 ## Symptom
 
 Using `run-term` to invoke an in-memory clause produces a 500 error.
@@ -10,6 +26,8 @@ Using `run-term` to invoke an in-memory clause produces a 500 error.
 ;; BAD — 500 error
 (run-term MyClause arg1 arg2 Result)
 ```
+
+In some shapes (notably when the in-memory helper is reached via capture and the args do not align cleanly), the failure is not a 500 but an `ECONNRESET` with the engine in a stalled state. Same root cause, harder failure mode.
 
 ## Why
 
@@ -28,12 +46,13 @@ Use `call` instead. `call` is designed for in-memory clause invocation:
 
 | Term | Use For |
 |------|---------|
-| `call` | In-memory clauses (symbols bound in the solution table) |
-| `run-term` | Functor objects from datastores |
-| `run-page` | Invoking a full page by ID through the public API |
+| `call` | In-memory clauses (symbols bound in the solution table). **Default for captured-helper invocations.** |
+| `run-term` | Functor objects from datastores. For captured-helper invocations, use **only** when replacing `with-group-by` (partition-before-fold scaling). |
+| `run-page` | Invoking a full page by ID through the public API. |
 
 ## Related
 
 - [Clauses — Stored vs In-Memory](../reference/clauses.md#in-memory-clauses-bound-to-a-symbol) — the language-reference distinction between stored clauses (callable by `run-term`) and in-memory clauses (callable by `call`).
 - [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — when the helper must be a stored clause for `run-term` to find it but the body still needs an outer-scope binding, capture is the bridge: define the stored clause at the top level, build a functor, and capture the functor into the implementation clause that calls it.
-- [`call` vs `run-term` solution scoping](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the deeper explanation of when each term is structurally required (per-row freshness, partition-before-fold) vs interchangeable.
+- [Reducers — Performance: partitions and `run-term`](../reference/reducers.md#performance-partitions-and-run-term) — the sole exception: when replacing `with-group-by` with a per-partition `run-term` invocation for scaling, `run-term` is correct. Outside this pattern, use `call`.
+- [`call` vs `run-term` solution scoping](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the deeper explanation of when each term is structurally required (per-row freshness, partition-before-fold) vs interchangeable. Note: the per-row-freshness case requires a **stored** helper; for captured **in-memory** helpers the only valid `run-term` shape is partition replacement.

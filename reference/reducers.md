@@ -109,6 +109,8 @@ The idiomatic workaround is to **establish the partition boundary before folding
 
 Measured 2026-04-24 for a 21-page pull: 8.3s with a top-level `with-group-by [PageId]`, 0.5s when the same reducer body was called via `run-term` per page. See [query-omega-oql/docs/explanation/fold-partition-scaling.md](../../query-omega-oql/docs/explanation/fold-partition-scaling.md) for the full explanation and canonical SLOW/FAST pattern.
 
+**This is the sole valid `run-term` shape for captured in-memory helpers.** Outside the partition-before-fold pattern — for one-solution-in / one-solution-out helpers, list-mapping helpers, validation helpers, etc. — use `call`. `run-term` against a captured in-memory helper produces a 500 or engine spin-out / `ECONNRESET`. See [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) for the rule statement and the captured-helper framing.
+
 ## fold pitfalls
 
 ### fold is solution-wide, not per-row
