@@ -12,6 +12,84 @@ A clause defines a rule — when its head is true based on its body. Clauses are
 
 Read this as: **Head is true if the body terms are all true.**
 
+## Clause size and decomposition
+
+A clause body is a unit of debugging. When something throws inside a body, the stack trace dumps the entire body — the larger the body, the harder it is to localize the failure. There are also second-order effects: long bodies tend to grow nested `with-table-if`s, which compound the same problem (see [Control flow → Nesting](control-flow.md#nesting)).
+
+The discipline:
+
+1. **5–10 lines per clause body.** If a body grows past ~10 terms, split it into smaller helper clauses. There is no engine-enforced limit — this is a debugging discipline, not a parser rule. Long bodies still run; they just become much harder to triage when something goes wrong, especially under high-fan-out load (LLM calls, large folds) where the failure is some terms deep into the body.
+2. **No nested `with-table-if`s in any clause body.** Use **flat sequential** `with-table-if`s instead — each one does one piece of classification, the next reads the result via normal per-row unification. This is documented in detail at [Control flow → Nesting](control-flow.md#nesting); the rule is repeated here because it is the dominant reason a clause body grows past 10 lines.
+3. **Compose via `(call SmallHelper ...)`, not via inline `(and ...)` blocks.** A 90-line `(and ...)` holding 15 distinct concerns is the anti-pattern. Stack traces from inside the `(and ...)` lose the branch boundary — you cannot tell from the trace which of the 15 concerns was executing. Lift each concern into its own named helper clause, and the trace tells you which helper was active. The named symbol *is* the breadcrumb.
+4. **Each helper that calls captured helpers must declare its own `{"capture" [...]}`.** Captures do not propagate through nested `call` / `run-term` — a helper invoked via `call` from inside another clause does not inherit the outer clause's capture set. Each level that needs a captured symbol must list it. See [Closures / Capture](#closures--capture) below.
+
+### Decomposition shape
+
+The canonical shape for a workflow OnEvent or other large entry-point clause is:
+
+- **One `BuildCtx`/`ResolveCtx` helper** that resolves the page hierarchy and database ids into a single `Ctx` map. Threads downstream as a single schema element instead of N separate ids — see [Control flow → The Ctx-threading pattern](control-flow.md#the-ctx-threading-pattern).
+- **A handful of read helpers** (one per source — read filter inputs, read memory, read reports) each 5–10 lines, each pulling its own fields out of `Ctx`.
+- **One or more compute helpers** (batch, build user message, dispatch LLM, etc.) each 5–10 lines.
+- **Write helpers** (one per destination), each invoked via `(call WriteHelper ...)` from a parent clause.
+- **A thin entry-point clause** (OnEvent, Run, Install, etc.) — usually 5–15 lines — that captures the top-level helpers and orchestrates the sequence of `(call ...)` invocations. The entry-point body is mostly pipe and gating, not logic.
+
+### Working exemplar
+
+The MAB Strategist post-refactor implementation is the canonical cargo-cult shape: 19 helpers each 5–10 lines, OnEvent body 11 lines (`~/Development/wttc/mab/impl/a24d83d6-workflows/83f5d9b7-design/b07b8100-mab-strategist/e9ca2103-implementation.oql`, commit `b779ca8`). Sketch:
+
+```oql
+;; Resolves page hierarchy and db-ids into a single Ctx map.
+(:- (ResolveStratCtx Exec Ctx)
+    (get-in Exec ["method" "page-id"] SelfPageId)
+    (Qo.Public.OqlApi.Page/page-by-id SelfPageId SelfPage)
+    ;; ...parent-walk + child-page-by-name...
+    (= Ctx {"brief-page" BriefPage
+            "instructions-db-id" InstructionsDbId
+            "treatments-db-id" TreatmentsDbId
+            ;; ...
+            }))
+
+;; Reads filter inputs as flat sequential with-table-ifs (no nesting).
+(:- (ReadStratFilter Ctx ActiveCount WrittenCount UnwrittenIds UnwrittenCount
+                     {"capture" [UnwrittenTreatments]})
+    (get Ctx "treatments-db-id" TreatmentsDbId)
+    (get Ctx "strategies-db-id" StrategiesDbId)
+    (with-table-if (Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder TreatmentsDbId AnyTPid _)
+      [TreatmentsDbId AnyTPid ActiveIds]
+      ;; ...then-branch...
+      (= ActiveIds []))
+    (with-table-if (Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder StrategiesDbId AnySPid _)
+      [StrategiesDbId AnySPid WrittenIds]
+      ;; ...then-branch...
+      (= WrittenIds []))
+    (call UnwrittenTreatments ActiveIds WrittenIds UnwrittenIds)
+    (length ActiveIds ActiveCount)
+    (length WrittenIds WrittenCount)
+    (length UnwrittenIds UnwrittenCount))
+
+;; Thin entry point — captures the helpers and orchestrates the sequence.
+(:- (OnEvent Exec Result
+             {"capture" [ResolveStratCtx ReadStratFilter ProcessStratBatch LatestInstrContent]})
+    (call ResolveStratCtx Exec Ctx)
+    (get Ctx "brief-page" BriefPage)
+    (get Ctx "instructions-db-id" InstructionsDbId)
+    (Qo.Public.OqlApi.Page.Bl.Html/get-content BriefPage "Content" BriefContent)
+    (call LatestInstrContent InstructionsDbId "strategist" InstrContent)
+    (call ReadStratFilter Ctx ActiveCount WrittenCount UnwrittenIds UnwrittenCount)
+    (with-table-if (> UnwrittenCount 0)
+      [Exec Ctx UnwrittenIds UnwrittenCount BriefContent InstrContent Result ProcessStratBatch]
+      (call ProcessStratBatch Exec Ctx UnwrittenIds UnwrittenCount BriefContent InstrContent Result)
+      (= Result {"has-more" "false" "unwritten-count" 0 "skipped" "no-work"})))
+```
+
+The MAB Enumerate implementation shows the same shape with a `BuildCtx` + thin OnEvent (`~/Development/wttc/mab/impl/a24d83d6-workflows/83f5d9b7-design/d230922b-mab-enumerate/02a9dbd9-implementation.oql`, lines 130–185).
+
+### Anti-pattern (what NOT to do)
+
+The pre-refactor Strategist OnEvent (Strategist commit `c681381`, 150 lines, with a 90-line nested `(and ...)` block holding 15 distinct concerns) is the shape to avoid. It executed correctly, but during cold-start `EOFException` debugging the stack trace pointed at "somewhere inside the `(and ...)`" — there was no way to tell which of the 15 concerns had thrown. The refactor to the shape above made the same failure trivially localizable: the trace named the helper.
+
+The discipline is project lore distilled from that experience. Apply it from the start of every workflow implementation, not as a post-hoc cleanup.
+
 ## Stored Clauses (written to the database)
 
 When a clause head is namespaced with a datastore and ends with `!`, it's **stored** in that datastore. It persists across queries — any future query can call it.

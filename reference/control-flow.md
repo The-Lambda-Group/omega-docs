@@ -222,7 +222,7 @@ Better: skip `(defined X)` entirely when you can. Use a concrete value check lik
 - **Stack traces lose the branch boundary.** When something fails inside a nested `with-table-if`, the trace dumps the entire outer branch body, making it hard to tell which branch was actually executing. Debugging nested failures is significantly harder than debugging flat sequential `with-table-if`s.
 - **Schema discipline compounds.** Inner `with-table-if`s need all the row-identity concerns of outer ones plus any state the outer branch just bound.
 
-Prefer **flat sequential `with-table-if`s** over nesting when possible — each one handles one piece of classification, the next one reads the result of the previous via normal per-row unification:
+Prefer **flat sequential `with-table-if`s** over nesting when possible — each one handles one piece of classification, the next one reads the result of the previous via normal per-row unification. When a clause body grows past ~10 lines or you find yourself reaching for a nested `with-table-if`, that is the trigger to split the body into smaller helper clauses; see [Clauses → Clause size and decomposition](clauses.md#clause-size-and-decomposition) for the canonical shape and a working exemplar.
 
 ```oql
 ;; GOOD — flat, sequential. Each step does one thing.
