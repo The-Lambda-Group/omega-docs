@@ -166,6 +166,41 @@ Or count rows directly with a literal `1` instead of a column:
   (fold 0 1 + Count))
 ```
 
+### Counting source-array length vs. fold-accumulator length
+
+The same "fold sees unique values, not rows" rule has a second consequence: a uniqueness-validation check that compares `(length AllKeys ...)` against `(length UniqueKeys ...)` after both have been produced by `fold` will always report "no duplicates" — because both arrays are already deduplicated by the time `length` measures them.
+
+If the goal is to detect duplicate keys in an LLM-produced (or user-produced) array of records before any write, **measure the source array directly with `length`, not the post-fold accumulator**:
+
+```oql
+;; WRONG — Total counts unique keys, not records. Duplicates always pass.
+(get Drafts _ Draft)
+(get Draft "treatment_id" Tid)
+(get Draft "name" Name)
+(string-concat Tid "::" Partial)
+(string-concat Partial Name PairKey)
+(fold [] PairKey append AllKeys)
+(length AllKeys Total)               ;; ← already-deduplicated count
+(call IntoSet AllKeys UniqueSet)
+;; ...comparison is tautological.
+
+;; RIGHT — Total = source-array length, before fold dedupes.
+(get Drafts _ Draft)
+(get Draft "treatment_id" Tid)
+(get Draft "name" Name)
+(string-concat Tid "::" Partial)
+(string-concat Partial Name PairKey)
+(fold [] PairKey append AllKeys)
+(length Drafts Total)                ;; ← measure the input array
+(call IntoSet AllKeys UniqueSet)
+(get UniqueSet UKey _)
+(fold [] UKey append UniqueKeys)
+(length UniqueKeys UniqueCount)
+(with-table-if (= UniqueCount Total) [...] ok throw-duplicate-keys)
+```
+
+The exemplar in MAB Manager's `ValidateCommands` is the same shape — `(length Commands TotalCount)` against `(length UniqueAgents UniqueCount)`. The rule generalises: any "are there duplicates in this array?" check must measure the source array's length, not a folded view of it. See [explanation/agent-step-write-shapes.md § Pattern 1](../explanation/agent-step-write-shapes.md#pattern-1--uniqueness-validation-against-a-source-array-not-a-folded-accumulator) for the agent-step-level discussion.
+
 ### Why batch=1 masks fold bugs
 
 With one row in the solution, "all rows" and "this row" are the same set. The fold accumulator contains exactly one row's values, so the output looks correct. Both fold pitfalls only surface when the batch contains two or more rows.
