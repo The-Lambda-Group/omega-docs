@@ -141,6 +141,54 @@ After each subagent dispatch, the orchestrator runs this checklist before markin
 
 Mid-flight drift gets caught at the next gate, not three phases later. The Phase 2 nested-with-table-if anti-pattern would have been caught at Task 4 (the first time inline OQL was added to OnEvent body) instead of being discovered after 5 commits and requiring a separate refactor commit to fix.
 
+## Subagent model selection (default Sonnet, escalate to Opus on signal)
+
+**Default: every subagent dispatch — fill-gap, implementer, executor, reviewer — runs on Sonnet.** Escalate to Opus only when the orchestrator has a specific reason to.
+
+The reason this rule exists: every subagent dispatch this orchestrator has run inherits the parent model unless the `model` parameter is explicitly set on the Agent tool. Without an explicit default, that means every subagent runs on whatever the orchestrator session is using — typically Opus. For mostly-mechanical work (read sources, write a markdown doc, push-run-verify a known cargo-cult pattern), Opus is wasted compute. The user pays Opus token rates for Sonnet-grade work.
+
+The Anthropic-docs-prescribed pattern (in superpowers' `subagent-driven-development` skill, "Model Selection" section) is to match model to task complexity. This doc operationalizes that into a default-and-escalate rule.
+
+### Defaults by task type
+
+| Task type | Default model | Reasoning |
+|---|---|---|
+| **Fill-gap agents** (read sources, write doc, update parent README, commit) | Sonnet | Pure mechanical doc-writing. Sonnet handles markdown synthesis from gap fallback-source + sibling-doc style cleanly. |
+| **Implementer agents on cargo-cult tasks** (helper extraction, prompt edits, push-run-verify of a known pattern) | Sonnet | The plan supplies the exact code; subagent's job is push-run-verify discipline, not invention. |
+| **Implementer agents on novel patterns** (first-time encounter with a failure mode, helper shape that doesn't have a cargo-cult source, anything where the plan's code template is approximate rather than verbatim) | Opus | Real reasoning needed. |
+| **Diagnostic / debug agents** (capture raw failure state, isolate root cause, propose hypothesis) | Opus | Requires synthesis across the failure trace + KB + code. Sonnet often misses subtle clues. |
+| **Spec compliance reviewers** (compare diff vs plan/spec for omissions or scope creep) | Opus | Reviewer agents need the same reasoning capacity as plan-authors. |
+| **Code quality reviewers** (read diff, assess against discipline + style + KB rules) | Opus | Same. Catches issues the implementer missed because the implementer's framing was too narrow. |
+
+### Promotion triggers
+
+When a Sonnet agent is floundering, re-dispatch with Opus. Floundering signals:
+
+1. **Two retries on the same symptom** — Sonnet returned `BLOCKED` or `DONE_WITH_CONCERNS` twice with the same root failure. Promotion is the natural response to "model isn't getting it."
+2. **A Sonnet implementer's output fails orchestrator-review structurally** (helpers not extracted, OnEvent grew, captures missing). Re-dispatch the same task with Opus and a sharper prompt.
+3. **A Sonnet diagnostic returns "I don't know"** without producing useful evidence. Re-dispatch with Opus to actually diagnose.
+4. **Cost pressure resolves the other way** — if the user is rationing tokens, default to Sonnet harder; Opus escalation requires explicit justification.
+
+### How to dispatch
+
+The Agent tool takes an optional `model` parameter (`"sonnet"` / `"opus"` / `"haiku"`). For default Sonnet, set it explicitly:
+
+```
+Agent({
+  description: "Fill gap: <slug>",
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  run_in_background: true,
+  prompt: "..."
+})
+```
+
+If `model` is omitted, the subagent inherits the orchestrator's model — typically Opus. Don't omit; set it explicitly to make the cost choice visible at dispatch time.
+
+### What this saves
+
+A typical OQL agent-step build session involves ~10-20 subagent dispatches (fill-gaps, implementer per phase, reviewer per phase). At Opus token rates that's significant. Defaulting to Sonnet for the ~70% that's mechanical, escalating to Opus for the ~30% that needs reasoning, is a 2-3× session cost reduction at no quality loss for the mechanical tasks. The orchestrator-review pattern (see prior section) catches Sonnet's structural mistakes before they propagate, which is the real safety net.
+
 ## Plan-authoring checklist
 
 Before dispatching a plan to subagents, validate it against this checklist:
