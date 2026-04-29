@@ -109,7 +109,12 @@ The idiomatic workaround is to **establish the partition boundary before folding
 
 Measured 2026-04-24 for a 21-page pull: 8.3s with a top-level `with-group-by [PageId]`, 0.5s when the same reducer body was called via `run-term` per page. See [query-omega-oql/docs/explanation/fold-partition-scaling.md](../../query-omega-oql/docs/explanation/fold-partition-scaling.md) for the full explanation and canonical SLOW/FAST pattern.
 
-**This is the sole valid `run-term` shape for captured in-memory helpers.** Outside the partition-before-fold pattern — for one-solution-in / one-solution-out helpers, list-mapping helpers, validation helpers, etc. — use `call`. `run-term` against a captured in-memory helper produces a 500 or engine spin-out / `ECONNRESET`. See [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) for the rule statement and the captured-helper framing.
+**There are two valid `run-term` shapes for captured in-memory helpers:**
+
+1. **Partition-before-fold** (this section) — replace `with-group-by` with a per-partition `run-term` invocation. Each invocation's solution is single-partition, so reducers run against only that partition's rows.
+2. **Per-row iteration at scale** — invoke a helper once per row in a multi-row solution table where K ≥ ~30 rows. Empirically (MAB Allocate V1, K=40 arms, 2026-04-30), `call` per-row hangs at this scale; `run-term` per-row drops wall-clock to 3–5s. The fresh-solution isolation mechanism is the same as in partition-before-fold. See [run-term per-row in multi-solution iteration](../explanation/run-term-per-row-iteration.md) for the full pattern and empirical data.
+
+Outside these two shapes — for one-solution-in / one-solution-out helpers, list-mapping helpers, validation helpers, etc. — use `call`. `run-term` against a captured in-memory helper in any other context produces a 500 or engine spin-out / `ECONNRESET`. See [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) for the rule statement and the captured-helper framing.
 
 ## fold pitfalls
 

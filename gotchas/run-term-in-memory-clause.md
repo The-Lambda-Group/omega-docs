@@ -50,9 +50,29 @@ Use `call` instead. `call` is designed for in-memory clause invocation:
 | `run-term` | Functor objects from datastores. For captured-helper invocations, use **only** when replacing `with-group-by` (partition-before-fold scaling). |
 | `run-page` | Invoking a full page by ID through the public API. |
 
+## Iteration-context exception: per-row invocation at scale
+
+There is a second valid `run-term` shape for captured in-memory helpers: **per-row invocation inside a multi-solution iteration at scale (K ≥ ~30 rows)**.
+
+Empirically (MAB Allocate V1, 2026-04-30, K=40 arms): two independent `(call CapturedHelper ...)` per-row invocations both produced engine spin-out / hangs. Switching both to `(run-term CapturedHelper ...)` fixed the hangs and dropped wall-clock to 3–5s. The hypothesis is that `call` per-row shares solution scope with the enclosing K-row iteration, and accumulated residue scales non-linearly. `run-term` creates a fresh solution per invocation, isolating per-row state.
+
+**The updated rule:**
+
+| Shape | Use |
+|-------|-----|
+| One-solution-in / one-solution-out helper | `call` |
+| List-mapping, validation, transformation helper | `call` |
+| Replacing `with-group-by` (partition-before-fold) | `run-term` |
+| Per-row invocation in multi-row iteration at K ≥ ~30 | `run-term` |
+
+If you are iterating over K rows and calling a helper once per row where K might reach ~30+, use `run-term` even though the helper is an in-memory captured clause.
+
+See [run-term per-row in multi-solution iteration](../explanation/run-term-per-row-iteration.md) for the full pattern, worked examples, scaling data, and cargo-cult sources.
+
 ## Related
 
 - [Clauses — Stored vs In-Memory](../reference/clauses.md#in-memory-clauses-bound-to-a-symbol) — the language-reference distinction between stored clauses (callable by `run-term`) and in-memory clauses (callable by `call`).
 - [Clauses — Closures / Capture](../reference/clauses.md#closures--capture) — when the helper must be a stored clause for `run-term` to find it but the body still needs an outer-scope binding, capture is the bridge: define the stored clause at the top level, build a functor, and capture the functor into the implementation clause that calls it.
-- [Reducers — Performance: partitions and `run-term`](../reference/reducers.md#performance-partitions-and-run-term) — the sole exception: when replacing `with-group-by` with a per-partition `run-term` invocation for scaling, `run-term` is correct. Outside this pattern, use `call`.
-- [`call` vs `run-term` solution scoping](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the deeper explanation of when each term is structurally required (per-row freshness, partition-before-fold) vs interchangeable. Note: the per-row-freshness case requires a **stored** helper; for captured **in-memory** helpers the only valid `run-term` shape is partition replacement.
+- [Reducers — Performance: partitions and `run-term`](../reference/reducers.md#performance-partitions-and-run-term) — partition-before-fold: when replacing `with-group-by` with a per-partition `run-term` invocation for scaling, `run-term` is correct. The per-row-iteration exception uses the same fresh-solution mechanism.
+- [`call` vs `run-term` solution scoping](https://github.com/The-Lambda-Group/query-omega-oql/blob/master/docs/explanation/call-vs-run-term-on-captured-helpers.md) — the deeper explanation of when each term is structurally required (per-row freshness, partition-before-fold) vs interchangeable. Note: the per-row-freshness case requires a **stored** helper; for captured **in-memory** helpers the two valid `run-term` shapes are partition replacement and per-row iteration at scale.
+- [run-term per-row in multi-solution iteration](../explanation/run-term-per-row-iteration.md) — the iteration-context exception: empirical evidence, threshold data, hypothesis, and the updated rule table.
