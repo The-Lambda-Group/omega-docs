@@ -37,6 +37,90 @@ If you find another "obvious" name that doesn't exist, add it here rather than l
 (>= A B)                             ;; greater than or equal
 ```
 
+## Random
+
+```oql
+(rand Output)                        ;; uniformly random double in [0.0, 1.0)
+```
+
+**`rand`** binds `Output` to a uniformly random double in the half-open interval `[0.0, 1.0)`. It is a pure output term — there are no input arguments and no failure cases.
+
+```oql
+;; Generate a random probability weight
+(rand Weight)
+
+;; Use as a threshold for 30 % sampling
+(rand R)
+(< R 0.3)   ;; succeeds ~30% of the time; fails and drops the solution otherwise
+```
+
+**Randomness source:** `java.util.concurrent.ThreadLocalRandom` (JVM built-in). Thread-safe with no lock contention across query threads.
+
+**Constraints and non-goals:**
+
+| Property | Value |
+|---|---|
+| Range | `[0.0, 1.0)` — lower bound inclusive, upper bound exclusive |
+| Output type | double |
+| Seedable? | No — each call is independent, no `with-rand-seed` |
+| Cryptographic? | No — not suitable for security-sensitive uses |
+| Failure cases | None — `(rand Output)` never throws |
+
+**Note on multi-solution queries:** in a query that produces N solutions, each solution gets its own independent call to `rand` — the same OQL expression appearing once in the body produces a different value per solution row. This is the expected behavior for sampling use cases.
+
+### `rand-int` — random integer in a range
+
+```oql
+(rand-int Min Max Output)            ;; uniformly random integer in [Min, Max)
+```
+
+**`rand-int`** binds `Output` to a uniformly random integer in the half-open interval `[Min, Max)`. `Min` and `Max` are both required inputs; `Output` is the generated value.
+
+```oql
+;; Roll a six-sided die (1–6)
+(rand-int 1 7 Roll)
+
+;; Pick a random index into a 10-element array
+(rand-int 0 10 Idx)
+
+;; Negative ranges are supported
+(rand-int -10 0 Offset)   ;; Offset in [-10, -1]
+
+;; Single-value range — always returns Min
+(rand-int 5 6 Fixed)      ;; Fixed = 5
+```
+
+**Signature:**
+
+| Arg | Direction | Type | Notes |
+|---|---|---|---|
+| `Min` | input | integer | Inclusive lower bound. |
+| `Max` | input | integer | Exclusive upper bound. Must be greater than `Min`. |
+| `Output` | output | long | Random integer in `[Min, Max)`. |
+
+**Validation and typed errors:**
+
+`rand-int` validates its inputs at call time and throws a typed OQL exception on any violation. Unlike most existing arithmetic terms, it does not silently NPE on bad input.
+
+| Condition | Exception type | When it fires |
+|---|---|---|
+| `Min` or `Max` is unbound at call time | `RAND_INT_UNBOUND_ARG` | A symbol was passed for `Min` or `Max` but it has not been bound in the current solution context. |
+| `Min` or `Max` is not an integer | `RAND_INT_NON_INTEGER` | Floats, strings, maps, or any non-integer value passed as a bound. |
+| `Min >= Max` | `RAND_INT_BAD_RANGE` | Empty or inverted range — no valid integer can satisfy `[Min, Max)`. |
+
+**Constraints and non-goals:**
+
+| Property | Value |
+|---|---|
+| Range | `[Min, Max)` — lower bound inclusive, upper bound exclusive |
+| Output type | long |
+| Seedable? | No — each call is independent, no `with-rand-seed` |
+| Cryptographic? | No — not suitable for security-sensitive uses |
+
+**Randomness source:** `java.util.concurrent.ThreadLocalRandom` (JVM built-in, same as `rand`). Thread-safe with no lock contention across query threads.
+
+**Sibling term:** `rand` generates a random double in `[0.0, 1.0)` with no inputs and no failure cases — documented above.
+
 ## Map Operations
 
 ```oql
