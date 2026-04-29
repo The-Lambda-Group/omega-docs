@@ -6,10 +6,9 @@ Public documentation for the [Omega](https://github.com/The-Lambda-Group) platfo
 
 ## Methodology (read first)
 
-Two cross-cutting docs encode the OQL loop. They are methodology, not peers of task-specific how-tos -- read them before descending into the buckets below:
+One doc encodes the entire OQL loop — authoring and triage in both directions. It is methodology, not a peer of task-specific how-tos -- read it before descending into the buckets below:
 
-- [how-to/develop-oql-implementations.md](how-to/develop-oql-implementations.md) -- The authoring loop. Push -> run -> verify, one transformation at a time. Read before writing any OQL.
-- [how-to/narrow-an-oql-failure.md](how-to/narrow-an-oql-failure.md) -- The triage loop (the authoring loop in reverse). Six artifact-producing rules for diagnosing a failing query without shipping a pattern-matched non-fix. Read before debugging any OQL failure (Mango, `full-scan`, `WRITING_SYMBOLS`, no-return, slow-but-correct).
+- [how-to/develop-oql.md](how-to/develop-oql.md) -- The OQL operating manual. Covers the probe-don't-build mindset, the `Result`-as-inspection-channel mechanic, the authoring loop (forward: push → run → verify one transformation at a time), the triage loop (backward: six artifact-producing rules for diagnosing failures without shipping a pattern-matched non-fix), LLM-specific failure-mode framing, the wall-clock-as-cardinality-signal heuristic, and two worked examples. Read before writing **or** debugging any OQL. Contains an "Operating manual (re-read every session)" 8-rule TLDR at the top — if you only have time for one thing, read that section.
 
 ## Navigation map
 
