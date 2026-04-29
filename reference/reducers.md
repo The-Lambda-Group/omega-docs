@@ -101,6 +101,8 @@ Counts solutions matching a term. Always produces exactly one solution row bindi
 
 **Restrict the inner term to a single call.** `with-count` over a compound condition — `(with-count Cnt (and Term1 Term2))` — currently fails with a `NullPointerException`. If you need to count rows matching a compound predicate, wrap the predicate in an in-memory clause and count over the clause invocation. See the "fold over zero solutions" section below for the full pattern.
 
+**The "wrap in a clause" workaround is insufficient when the wrapping clause contains a `prop-vals-by-folder` scan** — that variant also NPEs. Three distinct `with-count` NPE patterns are documented with a safe universal workaround in [gotchas/with-count-captured-helper-npe.md](../gotchas/with-count-captured-helper-npe.md). For any code that counts rows via a captured helper or compound predicate involving `prop-vals-by-folder`, use the `with-table-if` + `fold`-over-per-row-unique-symbol + `length` pattern documented there.
+
 ## Performance: partitions and `run-term`
 
 `fold` / `with-group-by` / `with-order-by` scale poorly when the solution table contains many distinct group-key values ("partitions"). Per-partition bookkeeping compounds non-linearly with partition count, so a query that iterates N keys and folds per key can be orders of magnitude slower than the underlying term read would suggest.
@@ -170,6 +172,50 @@ Or count rows directly with a literal `1` instead of a column:
 (with-table-if [RowId NeedsCreate] (= NeedsCreate "true")
   (fold 0 1 + Count))
 ```
+
+### Counting rows in a captured-helper body when with-count is unavailable
+
+When `with-count` is unavailable — due to any of its known NPE patterns (compound `(and ...)` predicate, sec-index trailing-wildcard, or a captured helper containing `prop-vals-by-folder`) — use the **fold-append-per-row-unique-symbol** pattern to count matching rows:
+
+```oql
+(:- (CountRowsMatchingPredicate ScanArgs FilterArgs Count)
+    (with-table-if (and (<scan term producing per-row symbols>)
+                        (<filter terms>))
+      [<header symbols including PerRowUniqueSymbol and RowList>]
+      (fold [] PerRowUniqueSymbol append RowList)
+      (= RowList []))
+    (length RowList Count))
+```
+
+**The load-bearing detail:** fold must be over a *per-row-unique* symbol, not a constant or a low-cardinality column. Since fold folds over unique values (see "fold folds over unique values, not rows" above), folding a symbol that has one distinct value per matching row produces one list entry per row — no dedup loss.
+
+In a CouchDB-backed `prop-vals-by-folder` scan, the page-id (`Pid` / `SaPid` etc.) is a reliable per-row-unique symbol because each CouchDB document has a unique `_id`.
+
+**Concrete example** (MAB Allocate V1, `CountSaForArm`, commit `5341753`):
+
+```oql
+(:- (CountSaForArm SaTableId Rev ExpId SaCount)
+    (with-table-if (and (Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder SaTableId SaPid SaPv)
+                        (get-in SaPv ["prop-vals" "revision"] Rev)
+                        (get-in SaPv ["prop-vals" "experiment_id"] ExpId))
+      [SaTableId Rev ExpId SaPid SaPv SaList]
+      (fold [] SaPid append SaList)
+      (= SaList []))
+    (length SaList SaCount))
+```
+
+**Why each piece is required:**
+
+| Piece | Role |
+|---|---|
+| `with-table-if` condition | Upstream-cardinality gate (canonical fold-with-default idiom). If zero rows match, the else-branch fires. |
+| else-branch `(= RowList [])` | Binds the accumulator to `[]` on the empty path, so `length` sees a bound symbol on both paths. |
+| `fold [] SaPid append SaList` | Folds the per-row-unique page-id. One unique `SaPid` per CouchDB row → one list entry per matching row. |
+| `(length SaList SaCount)` OUTSIDE `with-table-if` | Runs against whichever branch's binding survived. Produces `Count = 0` on the empty path. |
+
+**Why `(fold 0 1 + Count)` fails in a captured-helper body:** the literal-1 approach (documented above) only works when the surrounding solution context already has per-row distinctness. Inside a captured-helper body whose scan is `prop-vals-by-folder`, the implicit cardinality is governed by the helper's argument bindings, not by per-row identity. `1` is a constant — fold sees a single unique value and returns `1` regardless of how many rows the scan produced. Use a per-row-unique symbol instead.
+
+**When to use this pattern:** any time you need a row count inside a captured-helper body and any of the `with-count` NPE patterns applies. If `with-count` works in your context (single-clause predicate, no captured helper containing `prop-vals-by-folder`), the canonical fold-with-default idiom (§ "fold over zero solutions") is simpler. See [gotchas/with-count-captured-helper-npe.md](../gotchas/with-count-captured-helper-npe.md) for the full list of `with-count` NPE patterns and their workarounds.
 
 ### Counting source-array length vs. fold-accumulator length
 
