@@ -6,20 +6,20 @@ A multi-task plan that builds a workflow OnEvent (or any large entry-point claus
 
 This doc is meta — it's not about how to write OQL; it's about how to write *plans* that produce well-shaped OQL.
 
-## Hard Rule: develop-oql-implementations.md is mandatory in every OQL plan
+## Hard Rule: develop-oql.md is mandatory in every OQL plan
 
-**Every plan that touches OQL implementation work — agent-step OnEvent builders, query implementations, install impls, scratch queries, anything — MUST list [how-to/develop-oql-implementations.md](../how-to/develop-oql-implementations.md) as the single most important doc in its mandatory KB reading section.** The doc must appear FIRST, with emphatic framing ("read this twice, internalize it before any code change") and a brief explanation of why it's load-bearing.
+**Every plan that touches OQL implementation work — agent-step OnEvent builders, query implementations, install impls, scratch queries, anything — MUST list [how-to/develop-oql.md](../how-to/develop-oql.md) as the single most important doc in its mandatory KB reading section.** The doc must appear FIRST, with emphatic framing ("read this twice, internalize it before any code change") and a brief explanation of why it's load-bearing.
 
 This is non-negotiable. It is not a checklist item; it is a structural requirement of the plan itself. A plan that lists the mandatory KB reading without surfacing this doc with maximum emphasis is a malformed plan.
 
-**Why the rule exists:** every prior multi-session OQL build that produced a discipline failure (Researcher's ~600k token retry-loop, Enumerate's ~7 hangs, Copywriter Phase 2's 90-line nested OnEvent, the recurring "forgot to include this doc" plan-authoring miss) shared one root cause — the implementer hadn't internalized this doc. Other docs (clauses.md, reducers.md, the gotchas) are useful but secondary; if the implementer hasn't internalized develop-oql-implementations.md, none of the others save the work. The doc teaches the iteration loop (one change per push, return early to debug, never batch edits) that is the foundation everything else builds on.
+**Why the rule exists:** every prior multi-session OQL build that produced a discipline failure (Researcher's ~600k token retry-loop, Enumerate's ~7 hangs, Copywriter Phase 2's 90-line nested OnEvent, the recurring "forgot to include this doc" plan-authoring miss) shared one root cause — the implementer hadn't internalized `develop-oql.md`. Other docs (clauses.md, reducers.md, the gotchas) are useful but secondary; if the implementer hasn't internalized `develop-oql.md`, none of the others save the work. The doc covers both forward (authoring) and backward (triage) directions of the same loop, explicitly addresses LLM-specific failure modes (build-mode anti-pattern, mirror discipline), and teaches the iteration loop (one change per push, return early to debug, never batch edits) that is the foundation everything else builds on.
 
 **The plan-author's contract:**
 
 ```markdown
 ### THE SINGLE MOST IMPORTANT DOC — read this before anything else, then read it again
 
-- **`omega-docs/how-to/develop-oql-implementations.md`** — REPL-driven push/run/verify, one change per push, return early to debug, do not batch.
+- **`omega-docs/how-to/develop-oql.md`** — the consolidated authoring + triage manual. Operating manual TLDR (8 rules) at the top, probe-don't-build mindset, Result-as-inspection-channel, the verb shift for LLMs, two worked examples (authoring loop + triage loop). Read this twice; internalize it before any code change.
 
 This doc is more important than every other doc in this list combined. ...
 ```
@@ -196,7 +196,7 @@ Before dispatching a plan to subagents, validate it against this checklist:
 - [ ] Every task that adds functionality extracts a NEW helper. No task adds inline OQL to an existing helper's body.
 - [ ] OnEvent's target shape is documented at the top of the plan and referenced in every task. Each task explicitly states what OnEvent body should look like after the task lands.
 - [ ] `ProcessXBatch`'s target shape is documented and grows by exactly one `(call ...)` line per task.
-- [ ] [how-to/develop-oql-implementations.md](../how-to/develop-oql-implementations.md) appears at the top of the mandatory-reading list with the emphatic framing block from the Hard Rule above. (This is structural, not a soft checklist item — see Hard Rule near the top of this doc.)
+- [ ] [how-to/develop-oql.md](../how-to/develop-oql.md) appears at the top of the mandatory-reading list with the emphatic framing block from the Hard Rule above. (This is structural, not a soft checklist item — see Hard Rule near the top of this doc.)
 - [ ] [reference/clauses.md § Clause size and decomposition](../reference/clauses.md#clause-size-and-decomposition) is in the mandatory-reading list, AND the plan structure mirrors its discipline.
 - [ ] The cargo-cult source is named and is **the post-refactor shape** (e.g., Strategist `b779ca8`), not the pre-refactor plan.
 - [ ] Pre-flight rules (same-symptom-twice → stop, three-failures → stop, no destructive ops without authorization) are in the plan, applied to every task.
@@ -207,5 +207,5 @@ If a plan fails any of these, fix the plan before dispatching subagents. Plans a
 
 - [reference/clauses.md § Clause size and decomposition](../reference/clauses.md#clause-size-and-decomposition) — the canonical OQL discipline this implements at the plan level.
 - [reference/control-flow.md § Nesting](../reference/control-flow.md#nesting) — why nested `with-table-if`s are an anti-pattern, and the flat-sequential alternative.
-- [how-to/develop-oql-implementations.md](../how-to/develop-oql-implementations.md) — the push-run-verify discipline. This doc is the most important document for any OQL implementation work; every plan must surface it with emphatic framing.
+- [how-to/develop-oql.md](../how-to/develop-oql.md) — the consolidated authoring + triage manual. This doc is the most important document for any OQL implementation work; every plan must surface it with emphatic framing.
 - [explanation/oql-execution-model.md](oql-execution-model.md) — solution sets, terms-not-expressions, clause boundaries. Why small clauses isolate failures.
