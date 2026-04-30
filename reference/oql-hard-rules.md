@@ -39,6 +39,8 @@ Use library-level clauses instead. These are the sanctioned public API:
 
 If the public API lacks the operation you need, that is a gap to file — not a license to reach past it.
 
+**Read-only audit exception — `omega-cli db-name` + CouchDB HTTP.** For pre-migration row counts and audits, the sanctioned alternative is NOT a direct OQL `Qo.Data.*/` call — it is `omega-cli db-name <path> | curl GET /<db>/` to read `doc_count` from CouchDB metadata. This stays fully outside OQL and therefore outside Rule 2's scope. See [how-to/count-rows-in-a-defterm.md](../how-to/count-rows-in-a-defterm.md).
+
 ## 3. Never run mutations in scratch files
 
 Scratch files (invoked via `qo run` or `qo query` on a bare top-level term sequence) are **read-only**. No `delete!`, no `refresh`, no `write!`, no `!`-suffixed term that performs a write.

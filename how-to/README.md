@@ -32,6 +32,8 @@ This doc is the cross-cutting methodology for all OQL work -- authoring and tria
 
 ### OQL patterns
 
+- [Count all rows in a defterm](count-rows-in-a-defterm.md) -- How to get a total row count for a defterm table for pre-migration audits and sanity checks. Covers the CouchDB-direct approach (`omega-cli db-name` + `curl GET /<db>/` → `doc_count`) as the recommended O(1) path, explains why the OQL `with-count` all-wildcard form currently NPEs (empirically confirmed), and includes a decision table for when to use each approach. Keywords: count rows, doc_count, audit, migration, defterm, with-count, omega-cli db-name, CouchDB.
+
 - [Drop rows with forced unification failure](drop-rows-with-forced-unification-failure.md) -- The `(= true false)` idiom for deliberately excluding rows from a `with-table-if` branch. Covers when to use it (filtering HTTP errors, sentinel values, debug short-circuits), how it works (unification failure removes the row from the solution), and anti-patterns (don't use in else-branches, don't use at top level, don't confuse with `throw`). Keywords: drop rows, filter, unification failure, `(= true false)`, with-table-if, exclude, silent drop.
 
 - [Handle HTTP 422 in dispatch](handle-http-422-in-dispatch.md) -- How to prevent 422 and other unexpected HTTP status codes from leaking through `with-table-if` dispatch branches and causing `WRITING_SYMBOLS` errors. Covers the row-drop filter pattern, the general rule for HTTP status dispatch (enumerate all statuses or use a catch-all filter), and how to diagnose `WRITING_SYMBOLS` errors by tracing unbound symbols back to dispatch gaps. Keywords: HTTP 422, WRITING_SYMBOLS, status dispatch, unbound symbols, dispatch gap, catch-all filter.

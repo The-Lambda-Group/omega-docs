@@ -2,6 +2,12 @@
 
 # Query Execution
 
+## Scope of this document
+
+The Mango-fallback rule on this page applies **only to `with-skip` and `with-limit`**. It does not apply to `with-count`. `with-count` reads CouchDB view metadata and does not use the view scan path at all — it has no Mango fallback. See [reducers.md § with-count](reducers.md#with-count) for `with-count` performance notes and current NPE limitations.
+
+---
+
 ## with-skip / with-limit only work on view queries
 
 `with-skip` and `with-limit` thread `skip` and `limit` into the CouchDB view POST body as native parameters. They are the only way to paginate results inside OQL.

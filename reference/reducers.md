@@ -99,6 +99,10 @@ Counts solutions matching a term. Always produces exactly one solution row bindi
 (with-count Total (Qo.Db.Prop/prop-vals FolderId _ _))  ;; Total = row count
 ```
 
+**Performance and routing.** `with-count` reads CouchDB view metadata, not a view scan. The result is O(1) when the inner term resolves through a view index. The Mango-fallback rule from `query-execution.md` — where `with-skip`/`with-limit` are silently ignored on a Mango scan — **does not apply** to `with-count`; `with-count` never falls back to Mango.
+
+**All-wildcard form currently NPEs.** Passing all wildcards to count every row in a defterm — `(with-count Cnt (Qo.Namespace/term _ _ _ _))` — currently fails with `omega/jvm/NullPointerException` (empirically confirmed 2026-04-30). For a total row count, use `omega-cli db-name` + `curl GET /<db>/` → `doc_count` instead. See [how-to/count-rows-in-a-defterm.md](../how-to/count-rows-in-a-defterm.md).
+
 **Restrict the inner term to a single call.** `with-count` over a compound condition — `(with-count Cnt (and Term1 Term2))` — currently fails with a `NullPointerException`. If you need to count rows matching a compound predicate, wrap the predicate in an in-memory clause and count over the clause invocation. See the "fold over zero solutions" section below for the full pattern.
 
 **The "wrap in a clause" workaround is insufficient when the wrapping clause contains a `prop-vals-by-folder` scan** — that variant also NPEs. Three distinct `with-count` NPE patterns are documented with a safe universal workaround in [gotchas/with-count-captured-helper-npe.md](../gotchas/with-count-captured-helper-npe.md). For any code that counts rows via a captured helper or compound predicate involving `prop-vals-by-folder`, use the `with-table-if` + `fold`-over-per-row-unique-symbol + `length` pattern documented there.
