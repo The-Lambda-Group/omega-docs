@@ -18,6 +18,8 @@ Datastore: `omega/query-omega/public/oql-api/page`
 | `parent-page` | `(Qo.Public.OqlApi.Page/parent-page Page ParentPage)` |
 | `child-by-name` | `(Qo.Public.OqlApi.Page/child-by-name ParentPageId Name ChildPage)` |
 | `child-page-by-name` | `(Qo.Public.OqlApi.Page/child-page-by-name ParentPage Name ChildPage)` |
+| `child-page-by-path` | `(Qo.Public.OqlApi.Page/child-page-by-path ParentPage Path ChildPage)` |
+| `delete-page` | `(Qo.Public.OqlApi.Page/delete-page Page Result)` |
 | `child-page` | `(Qo.Public.OqlApi.Page/child-page ParentPage ChildPage)` |
 | `add-sub-page` | `(Qo.Public.OqlApi.Page/add-sub-page ParentPage PageName Result)` |
 | `add-or-get-sub-page-by-name` | `(Qo.Public.OqlApi.Page/add-or-get-sub-page-by-name Parent PageName SubPage)` |
