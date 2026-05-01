@@ -19,7 +19,6 @@ Datastore: `omega/query-omega/public/oql-api/page`
 | `child-by-name` | `(Qo.Public.OqlApi.Page/child-by-name ParentPageId Name ChildPage)` |
 | `child-page-by-name` | `(Qo.Public.OqlApi.Page/child-page-by-name ParentPage Name ChildPage)` |
 | `child-page-by-path` | `(Qo.Public.OqlApi.Page/child-page-by-path ParentPage Path ChildPage)` |
-| `delete-page` | `(Qo.Public.OqlApi.Page/delete-page Page Result)` |
 | `child-page` | `(Qo.Public.OqlApi.Page/child-page ParentPage ChildPage)` |
 | `add-sub-page` | `(Qo.Public.OqlApi.Page/add-sub-page ParentPage PageName Result)` |
 | `add-or-get-sub-page-by-name` | `(Qo.Public.OqlApi.Page/add-or-get-sub-page-by-name Parent PageName SubPage)` |
@@ -30,6 +29,16 @@ Datastore: `omega/query-omega/public/oql-api/page`
 | `page-blocks` | `(Qo.Public.OqlApi.Page/page-blocks AppId PageId Blocks)` |
 | `add-table-view` | `(Qo.Public.OqlApi.Page/add-table-view Page ViewName Result)` |
 | `add-or-get-table-view` | `(Qo.Public.OqlApi.Page/add-or-get-table-view Page ViewName Result)` |
+
+## Qo.Public.OqlApi.Dl
+
+Polymorphic delete dispatcher. Routes to the correct delete implementation based on page type; handles page-block cleanup, parent-PageBlock cleanup, Db.Prop cleanup for row pages, and the page row delete. Single source of truth lives in `Qo.Dl.Page/delete-data`.
+
+Datastore: `omega/query-omega/public/oql-api/delete`
+
+| Clause | Signature |
+|--------|-----------|
+| `delete-data` | `(Qo.Public.OqlApi.Dl/delete-data Page Result)` |
 
 ## Qo.Public.OqlApi.Page.Bl.LogStream
 
