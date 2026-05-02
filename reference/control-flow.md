@@ -95,6 +95,54 @@ Three things fall out of this model that match what you'll see in practice:
 
 3. **The else-branch is conventionally a left outer join.** Almost every else-branch is `(= true true)` — a no-op pass-through. Rows take the else branch, bind nothing new, continue forward. You *can* make the else-branch fail to drop rows there too, but that's unusual — when you want "drop these rows, keep the rest," the idiomatic pattern is to put the "drop" condition in the then-branch with `(= true false)` and leave the else-branch as `(= true true)`.
 
+### The existence-check fallacy (then-branch runs K times, not once)
+
+**This is one of the most common `with-table-if` mistakes, and it causes exponential output blowup that is hard to diagnose.**
+
+The SQL analogy above makes this precise: the then-branch is an INNER JOIN. If the condition generates K matching solutions, the then-branch runs K times — producing K solution rows from it. If the condition generates zero solutions, the else-branch runs once.
+
+The mental model is: **"for each solution from the condition, run then-branch; if the condition has zero solutions, run else-branch once."**
+
+This is NOT an existence check. An existence check would run the then-branch exactly once regardless of how many rows the condition matched. `with-table-if` does not do that.
+
+**The trap:** `prop-vals-by-folder` generates one solution per row it finds. If you gate a `with-table-if` on `(prop-vals-by-folder DbId Pid Pv)` and the folder has K rows, every downstream term in the then-branch runs K times. If your then-branch calls a helper that itself generates M solutions, you get K×M solutions out — a hidden cross-product.
+
+```oql
+;; BAD — "existence check" with multi-row condition
+;; If MemoryFolder has K rows, the then-branch runs K times,
+;; not once. The ReadLatestRevision helper below produces K
+;; identical solutions, not one. Downstream json-stringify
+;; calls K² times (or worse, K^n with nested helpers).
+(with-table-if (prop-vals-by-folder MemoryDbId MemFolderPid _)
+  [MemoryDbId MemFolderPid LatestRev]
+  (run-term ReadLatestRevision MemoryDbId LatestRev)   ;; runs K times
+  (= LatestRev "0000"))
+
+;; GOOD — gate on a single-solution condition
+;; fold collapses K rows to one accumulator, so the then-branch
+;; runs exactly once.
+(with-table-if (prop-vals-by-folder MemoryDbId MemFolderPid _)
+  [MemoryDbId MemFolderPid MemRows]
+  (fold [] MemPid append MemRows)   ;; then: collapse all rows to one list
+  (= MemRows []))                   ;; else: no rows → empty list
+
+;; Now MemRows is a single solution. Gate further work on it as needed.
+(with-table-if (> (length MemRows 0) 0)
+  [MemoryDbId MemRows LatestRev]
+  (run-term ReadLatestRevision MemoryDbId LatestRev)   ;; runs exactly once
+  (= LatestRev "0000"))
+```
+
+**To get true existence-check semantics that runs the then-branch exactly once**, you must eliminate the cardinality from the condition before the `with-table-if`. Two approaches:
+
+1. **Aggregate the condition via fold** — collapse the K-solution scan into a single list (or count) in a separate `fold` step. Gate the `with-table-if` on the aggregate, not the raw scan.
+
+2. **Use `run-page-by-id` against a query page that returns at most one result** — delegate the multi-row lookup to a sub-query whose result is a scalar.
+
+**Diagnostic sign:** if you see unexpected duplicate output rows, or a downstream term is called more times than you expect, check whether any upstream `with-table-if` condition is a multi-row scan (`prop-vals-by-folder`, `sec-index`, etc.). The K-times multiplier compounds through every nested helper call.
+
+This bug was first surfaced when a `ReadOneAgentMemory` implementation used `(prop-vals-by-folder ...)` as the condition. The agent had K Memory rows; the then-branch (including `json-stringify`) ran K times, producing K identical results. A caller iterating over agents produced K^n calls total and triggered a socket hang-up timeout.
+
 ### Conditionally binding variables
 
 The table head `[Var1 Var2 Result]` declares which symbols flow into both branches. This is how you **conditionally bind variables**:
