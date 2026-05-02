@@ -217,6 +217,35 @@ During heavy iteration on an OnEvent body, the cleanest setup is: comment out th
 
 Now `omega-cli run-query` exercises OnEvent directly without the `qo push` / `qo run` dispatch round-trip. Faster cycle, same semantics. Restore the `set-implementation-clauses` form when you're ready to deploy.
 
+### Verification stubs: `(= Result {...})` not `(return [...])`
+
+When stripping a clause body to confirm dispatch works, the correct stub is:
+
+```oql
+(:- (OnEvent Exec Result {"capture" [...]})
+    (= Result {"status" "ok"}))
+```
+
+`(= Result Value)` is how a clause binds its output variable — it is the standard output form in every clause body, including OnEvent. `(return [...])` is **not** the clause output form. It is a top-level impl-script form that appears at the very end of the `.oql` file to register clauses and signal success to `qo push`. It has no meaning inside a clause body.
+
+Using `(return [{"key" Output}])` inside a clause body does NOT bind `Result`. The symptom is:
+
+```json
+[{"omegadb/type": "symbol", "value-data": "Result"}]
+```
+
+`Result` is an unbound symbol — the clause never wrote to its output variable. Swap `(return [...])` for `(= Result {...})` and re-push.
+
+The distinction:
+
+| Location | Correct form | What it does |
+|---|---|---|
+| Inside a clause body (`(:- ...)`) | `(= Result Value)` | Binds the clause output variable |
+| End of the impl file (top-level) | `(return [Result])` | Registers clauses, signals success to `qo push` |
+| Top of a scratch query file | `(return [Result])` | Returns the scratch result to `qo run` |
+
+> Every V1 OQL implementation uses `(= Result {...})` exclusively inside clause bodies. If you see `(return [...])` inside a `(:- ...)` block in a plan or spec example, that example is wrong — correct it before pushing.
+
 ## Operating the loop forward: authoring
 
 Each iteration adds one verifiable piece. The loop:
