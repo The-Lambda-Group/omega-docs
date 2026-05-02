@@ -189,6 +189,101 @@ If `model` is omitted, the subagent inherits the orchestrator's model — typica
 
 A typical OQL agent-step build session involves ~10-20 subagent dispatches (fill-gaps, implementer per phase, reviewer per phase). At Opus token rates that's significant. Defaulting to Sonnet for the ~70% that's mechanical, escalating to Opus for the ~30% that needs reasoning, is a 2-3× session cost reduction at no quality loss for the mechanical tasks. The orchestrator-review pattern (see prior section) catches Sonnet's structural mistakes before they propagate, which is the real safety net.
 
+## Plan authorship discipline: evidence before assertion applies to plan writing
+
+The "evidence before assertion" rule is not just for impl execution — it applies to plan authorship too. Any OQL code written into a plan task (helper bodies, verification stubs, example snippets) must be cargo-culted from existing V1 impls, not recalled from training data.
+
+**The incident that motivated this rule:** the `gap-oql-return-vs-result-binding` incident. The plan author (an Opus model) wrote verification stub code from training-data intuition, using `(return [...])` where the correct V1 form is `(= Result {...})`. The error propagated into the plan, the implementer pushed it faithfully, and the implementer's A.1 subagent hit the unbound-symbol failure before the plan's error became visible. Reading any V1 helper body would have caught this in under 30 seconds.
+
+### The rule
+
+Before finalizing any plan task that contains OQL code, the plan author must:
+
+1. **Identify the V1 impl file** that contains the same or closest pattern. For agent-step plans, this is almost always the file at the cargo-cult source named earlier in the plan.
+2. **Grep or read the relevant section** of that file to confirm the exact syntax. Do not recall from training data — read the file.
+3. **Copy the pattern verbatim**, then adapt names. Do not paraphrase.
+
+Specific forms to always verify against source (not memory):
+
+| Pattern | Correct V1 form | Common wrong form |
+|---|---|---|
+| Binding the out-arg of an OnEvent clause | `(= Result {"key" Val})` | `(return [{"key" Val}])` |
+| Verification stub | `(= Result {"debug" SomeSymbol})` | `(return [SomeSymbol])` |
+| Capture header in a clause | `{"capture" [Helper1 Helper2]}` | `{"capture": ["Helper1", "Helper2"]}` |
+| Calling a captured helper | `(call Helper Arg1 Arg2 Out)` | `(Helper Arg1 Arg2 Out)` |
+| Fold with default | `(with-table-if cond [H] (fold [] X append Acc) (= Acc []))` | `(fold [] X append Acc)` without else-branch |
+
+This is not an exhaustive list. Any OQL syntax in any plan task is subject to the rule.
+
+### Why plans propagate errors downstream
+
+A plan task with wrong code creates a multi-step failure chain:
+
+1. Plan author writes wrong code from memory.
+2. Implementer reads the plan and implements it faithfully (the plan is the contract).
+3. Implementer pushes the wrong code.
+4. `qo run` returns a confusing error (unbound symbol, parse failure, etc.).
+5. Implementer and orchestrator spend time diagnosing a bug that was introduced at plan-authoring time.
+6. Root cause is the plan, not the impl — but by the time the error surfaces, the plan author is no longer in context.
+
+Reading the V1 impl before finalizing the plan costs 30 seconds and prevents this entire chain.
+
+### Relationship to the cargo-cult source requirement
+
+The existing plan-authoring checklist already requires naming a cargo-cult source. This section extends that requirement: naming the source is not enough — the plan author must **read** the source and verify the syntax before writing any code into the plan. "Cargo-cult" means copy from the source, not recall from memory what the source probably says.
+
+## LLM call budget analysis for multi-call steps
+
+When a single OnEvent makes more than one sequential LLM call, the combined input token volume can exceed the org's tokens-per-minute (TPM) rate limit. The failure mode is silent and late: the second call succeeds at dispatch but the API returns a `rate_limit_error` response with no `content[0].text`. `FetchLlmRespRaw` (or equivalent) dereferences `content[0].text` and no-returns. The step appears to succeed structurally but produces no output.
+
+**Estimate before you finalize the plan.** If any task in the plan calls the LLM twice in sequence, compute the rough combined input token volume before dispatching subagents.
+
+### Token estimation rule of thumb
+
+> **1 KB of text ≈ 250 tokens.**
+
+Apply this to every input surface for each call:
+- System message (Instructions HTML)
+- User message (brief, batch contents, memory, reports, prior-call output)
+- Any other content passed as context
+
+Sum the two (or more) call inputs. Compare against the org's TPM limit.
+
+**MAB org limit: Anthropic Sonnet has a 30,000 input tokens per minute rate limit.** Two consecutive Sonnet calls each with ~25K token inputs (e.g., a full brief + batch bundle) sum to ~50K — well over the 30K limit. The second call will rate-limit within the same OnEvent invocation.
+
+### Workaround 1: model split (Haiku for reasoning, Sonnet for structured output)
+
+Haiku and Sonnet have **separate TPM budgets**. A two-call step can split calls across models:
+
+- **Call 1 (reasoning/thinking):** use Haiku. Passes the full bundle. Produces `ThoughtsHtml` or a structured analysis.
+- **Call 2 (structured output):** use Sonnet. Passes only the first call's output, not the full bundle again.
+
+This pattern also reduces the second call's input size (see Workaround 2), making it doubly effective.
+
+### Workaround 2: reduce the second call's user message
+
+If the first call already analyzed the full bundle, the second call does not need the full bundle. It only needs the first call's output.
+
+Pattern:
+- Call 1 receives: brief + full batch + memory + reports → produces `ThoughtsHtml`
+- Call 2 receives: `ThoughtsHtml` only → produces structured JSON output
+
+This directly reduces the combined input budget without changing models. Combined with Workaround 1, the second call's input drops from ~25K to ~2-5K tokens.
+
+### When to apply this analysis
+
+- **Any step with two or more sequential LLM calls** — applies regardless of org or model, since the pattern generalises.
+- **Before finalizing the plan** — not after hitting the error in production. The debug cycle to identify a `rate_limit_error` no-return (add debug output to `FetchLlmRespRaw`, re-run, read the raw response) costs more than the 5-minute estimation at plan-authoring time.
+
+### Symptom recognition (if already in production)
+
+If you see:
+- No-return from `FetchLlmRespRaw` or equivalent on the second LLM call
+- No parse error, no throw — just no result
+- Intermittent failure (succeeds on short bundles, fails on large ones)
+
+Hypothesis: rate limit. Add debug output to `FetchLlmRespRaw` to log the raw API response. A `rate_limit_error` in the response body confirms it.
+
 ## Plan-authoring checklist
 
 Before dispatching a plan to subagents, validate it against this checklist:
@@ -199,7 +294,9 @@ Before dispatching a plan to subagents, validate it against this checklist:
 - [ ] [how-to/develop-oql.md](../how-to/develop-oql.md) appears at the top of the mandatory-reading list with the emphatic framing block from the Hard Rule above. (This is structural, not a soft checklist item — see Hard Rule near the top of this doc.)
 - [ ] [reference/clauses.md § Clause size and decomposition](../reference/clauses.md#clause-size-and-decomposition) is in the mandatory-reading list, AND the plan structure mirrors its discipline.
 - [ ] The cargo-cult source is named and is **the post-refactor shape** (e.g., Strategist `b779ca8`), not the pre-refactor plan.
+- [ ] **Any OQL code in plan tasks was verified against the V1 impl, not recalled from memory.** (See "Plan authorship discipline" section above.)
 - [ ] Pre-flight rules (same-symptom-twice → stop, three-failures → stop, no destructive ops without authorization) are in the plan, applied to every task.
+- [ ] **If the step makes two or more sequential LLM calls:** estimated combined input token volume using the 1 KB ≈ 250 token rule of thumb. If the sum approaches the org TPM limit (30K for Anthropic Sonnet at MAB), applied model-split (Haiku/Sonnet) or reduced-second-call-message workaround. (See "LLM call budget analysis for multi-call steps" above.)
 
 If a plan fails any of these, fix the plan before dispatching subagents. Plans are cheap to revise; refactor commits to fix shape mistakes are not.
 
