@@ -284,6 +284,33 @@ If you see:
 
 Hypothesis: rate limit. Add debug output to `FetchLlmRespRaw` to log the raw API response. A `rate_limit_error` in the response body confirms it.
 
+## Verification mirrors the helper tree
+
+The number and structure of verification cases in a plan should mirror the helper/clause tree directly. If a plan has 45 helpers organized into read and write sub-trees, the verification section should have approximately 150–225 cases — roughly **3–5 per helper** — not one case per phase.
+
+The cargo-cult failure mode: a plan for a 45-helper impl had 8 verification cases (one per phase), copied from a prior 12-helper V1 plan. The V1 ratio (roughly 1 case per phase) is only appropriate when each phase contains 1–2 helpers. When a phase contains 15 helpers, that ratio collapses 15 verifiable steps into 1 coarse gate that fires too late to isolate failures. The corrected V2 plan grew to ~50 cases across 10 verification phases.
+
+### Leaf-first ordering
+
+The ordering rule follows the tree structure:
+
+1. **Leaf helpers first** — each leaf helper verified standalone via a targeted OnEvent stub before being wired into its parent. The stub calls just that helper and returns its output in the Result envelope.
+2. **Sub-tree integration second** — once all leaves in a sub-tree pass, verify the sub-tree as a whole (the parent calls its children in sequence).
+3. **Phase integration third** — once sub-trees pass, verify the full phase (parent of sub-trees).
+4. **End-to-end OnEvent last** — only after all phases and sub-trees pass standalone.
+
+This ordering isolates failures: a verification case that fires 10 helpers at once and fails tells you "something in those 10 is wrong." A verification case that fires one helper and fails tells you exactly which helper is wrong.
+
+### Independent trees are verified independently
+
+Structurally independent trees (e.g., a read sub-tree and a write sub-tree that share no inputs) are verified independently. You do not need Tree 1 to pass before starting Tree 2 if they share no symbols. You do not need to call Tree 1 inside the verification stub for Tree 2. Only combine independent trees in an integration test once both pass standalone.
+
+### Mapping to plan tasks
+
+The ~3–5 per helper ratio is practical guidance, not a hard count. Apply it by walking the helper tree and asking: "If this helper throws, how many helpers does this verification case isolate it from?" A good verification case isolates one helper at a time for leaves, and one sub-tree at a time for integration cases.
+
+When writing a new verification phase in a plan, list the helpers that phase covers and ensure the verification cases in that phase let you distinguish which helper failed — not just whether the phase passed or failed as a unit.
+
 ## Plan-authoring checklist
 
 Before dispatching a plan to subagents, validate it against this checklist:
@@ -295,6 +322,7 @@ Before dispatching a plan to subagents, validate it against this checklist:
 - [ ] [reference/clauses.md § Clause size and decomposition](../reference/clauses.md#clause-size-and-decomposition) is in the mandatory-reading list, AND the plan structure mirrors its discipline.
 - [ ] The cargo-cult source is named and is **the post-refactor shape** (e.g., Strategist `b779ca8`), not the pre-refactor plan.
 - [ ] **Any OQL code in plan tasks was verified against the V1 impl, not recalled from memory.** (See "Plan authorship discipline" section above.)
+- [ ] **Verification cases mirror the helper tree at ~3–5 cases per helper.** Independent trees verified independently before combined. (See "Verification mirrors the helper tree" section above.)
 - [ ] Pre-flight rules (same-symptom-twice → stop, three-failures → stop, no destructive ops without authorization) are in the plan, applied to every task.
 - [ ] **If the step makes two or more sequential LLM calls:** estimated combined input token volume using the 1 KB ≈ 250 token rule of thumb. If the sum approaches the org TPM limit (30K for Anthropic Sonnet at MAB), applied model-split (Haiku/Sonnet) or reduced-second-call-message workaround. (See "LLM call budget analysis for multi-call steps" above.)
 
