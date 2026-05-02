@@ -246,6 +246,30 @@ The distinction:
 
 > Every V1 OQL implementation uses `(= Result {...})` exclusively inside clause bodies. If you see `(return [...])` inside a `(:- ...)` block in a plan or spec example, that example is wrong — correct it before pushing.
 
+### Safe restore: use a stub OnEvent between tasks, not the production OnEvent
+
+**Rule:** when a plan task ends with "restore the production OnEvent body, push to confirm," use a **safe restore stub** instead of the full production body. Only restore the real production OnEvent when explicitly testing end-to-end behavior (typically the final phase of a phased plan — Phase H or I).
+
+**Why this matters:** if the production OnEvent has side effects — LLM calls, `write-table` writes, Memory or Reports rows — every "push + run" during intermediate development tasks silently fires those side effects. In the Analyst agent, the production V1 OnEvent called `ProcessAnalyst`, which when the Platform Metrics table was non-empty fired a full LLM cycle that wrote Memory and Reports rows. Every between-task "push to confirm clean restore" during Phases A–G consumed Anthropic API budget and polluted the Memory table. No error appeared; no test failed. The cost was invisible until the budget was gone.
+
+**The safe restore stub:**
+
+```oql
+(:- (OnEvent Exec Result {"capture" [ResolveAnalystCtx]})
+    (call ResolveAnalystCtx Exec Ctx)
+    (= Result {"has-more" "false" "status" "safe-restore"}))
+```
+
+This stub verifies:
+
+1. The impl compiles and deploys without errors (`qo push` succeeds).
+2. The install page resolves correctly — `ResolveAnalystCtx` walks the page hierarchy and if it resolves, the plumbing is right.
+3. Zero LLM calls and zero DB writes occur.
+
+**What to adapt per agent:** swap `ResolveAnalystCtx` for your agent's context-resolver helper (the first captured helper that builds `Ctx` from `Exec`). The result envelope can always be `{"has-more" "false" "status" "safe-restore"}` — the value is just a recognisable sentinel that confirms the stub ran.
+
+**Only restore the full production OnEvent when the plan task explicitly says "test end-to-end behavior."** That is the one task where side effects are the point — you want the LLM to fire, the writes to land, and the output to be real. Every other restore-for-deploy checkpoint should use the safe stub.
+
 ## Operating the loop forward: authoring
 
 Each iteration adds one verifiable piece. The loop:
