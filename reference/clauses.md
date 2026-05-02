@@ -209,6 +209,45 @@ This is the recommended workaround when you need a stored clause's result availa
 
 **Warning:** Capture is experimental. There are known edge cases with capturing clauses inside other captured clauses. Keep capture usage flat — avoid nesting captured clauses.
 
+### Captures are not transitive — each call level must declare its own
+
+This is the most common capture mistake. Capture scope is **per-clause only**. When OnEvent captures `[ProcessAnalyst]` and calls `(call ProcessAnalyst ...)`, ProcessAnalyst runs inside its own scope. If ProcessAnalyst's body calls `(call ThinkPhase ...)` and `ThinkPhase` was declared in ProcessAnalyst's `{"capture" [ThinkPhase FormatPhase]}`, that capture is visible to ProcessAnalyst. It is **not** visible anywhere else — including OnEvent.
+
+Concretely: OnEvent captures [ProcessAnalyst], ProcessAnalyst captures [ThinkPhase FormatPhase]. OnEvent calls ProcessAnalyst. ProcessAnalyst tries to call ThinkPhase — but ThinkPhase is only available because ProcessAnalyst listed it in its own capture. That part works fine.
+
+The failure is the reverse assumption: if OnEvent were to call ThinkPhase directly, that fails — ThinkPhase is not in OnEvent's capture list and never will be by virtue of ProcessAnalyst having captured it.
+
+**Symptom:** `qo run` returns an error containing:
+
+```
+TermExecutionRunnable found for class: clojure.lang.Symbol
+```
+
+This means the runtime encountered a bare symbol where it expected a resolved clause. The symbol was in scope at push time but is not resolved at runtime because the capture chain was not set up at the calling level.
+
+**The fix — flatten to direct capture:**
+
+Do not build a multi-level orchestrator chain expecting captures to cascade down. Every clause that invokes `(call X)` must list `X` in its own `{"capture" [X]}`. The entry-point OnEvent must capture every helper it calls, regardless of whether those helpers also capture sub-helpers.
+
+```oql
+;; WRONG — two-level chain where OnEvent hopes ProcessAnalyst's captures cascade up
+(:- (OnEvent Exec Result {"capture" [ProcessAnalyst]})
+    (call ProcessAnalyst Exec Result))
+
+(:- (ProcessAnalyst Exec Result {"capture" [ThinkPhase FormatPhase]})
+    (call ThinkPhase Exec ThinkOut)
+    (call FormatPhase ThinkOut Result))
+
+;; CORRECT — OnEvent flattens: captures every helper it will ever call, directly
+(:- (OnEvent Exec Result
+             {"capture" [ResolveAnalystCtx ProcessThinkPhase ProcessFormatPhase]})
+    (call ResolveAnalystCtx Exec Ctx)
+    (call ProcessThinkPhase Ctx ThinkOut)
+    (call ProcessFormatPhase ThinkOut Result))
+```
+
+The rule: **every `(call X ...)` must have `X` in that clause's own `{"capture" [...]}`**. There is no capture inheritance across call boundaries.
+
 ### Related gotchas
 
 The capture mechanism interacts with several scoping and invocation rules documented in the gotchas tree. If you are diagnosing a runtime error that may originate in capture semantics, scan these:
