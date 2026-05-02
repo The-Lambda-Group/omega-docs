@@ -2,11 +2,11 @@
 
 # Agent-step write shapes
 
-A workflow agent step (Manager, Researcher, Strategist, Copywriter, Critic, Analyst, Execute, …) finishes by writing batched results — a set of rows into a primary table plus a single Memory row recording the agent's reasoning. Three patterns recur in those write paths and have to be chosen correctly per agent. Picking the wrong pattern produces silent corruption (the wrong rows survive a uniqueness check), per-row identity collisions (`KEY_UPDATE_CONFLICT` on the very first agent that runs against pre-existing data), or cold-start no-returns (the agent silently does nothing on its first deployment because its Memory guard fires against another agent's pre-existing rows).
+A workflow agent step (Manager, Researcher, Strategist, Copywriter, Critic, Analyst, Execute, …) finishes by writing batched results — a set of rows into a primary table plus a single Memory row recording the agent's reasoning. Four patterns recur in those write paths and have to be chosen correctly per agent. Picking the wrong pattern produces silent corruption (the wrong rows survive a uniqueness check), per-row identity collisions (`KEY_UPDATE_CONFLICT` on the very first agent that runs against pre-existing data), cold-start no-returns (the agent silently does nothing on its first deployment because its Memory guard fires against another agent's pre-existing rows), or silent mis-sourcing (a verification-role LLM summarises from prior verdicts instead of re-reading source data, passing checks it never actually ran).
 
-This doc explains the three shapes side by side, the conditions that pick each one, and the failure modes if you cargo-cult the wrong shape into the next agent step. The patterns generalise to any workflow agent step that batches LLM output to a primary table and records a Memory row.
+This doc explains the four shapes side by side, the conditions that pick each one, and the failure modes if you cargo-cult the wrong shape into the next agent step. The patterns generalise to any workflow agent step that batches LLM output to a primary table and records a Memory row.
 
-The canonical exemplars are MAB Manager (validation pattern), MAB Strategist (HTML-block write), and MAB Copywriter (text-column write). All three are flat-helpers shape per [agent-step-plan-shape.md](agent-step-plan-shape.md).
+The canonical exemplars are MAB Manager (validation pattern), MAB Strategist (HTML-block write), MAB Copywriter (text-column write), and MAB Analyst Format-phase (LLM audit specificity). All four are flat-helpers shape per [agent-step-plan-shape.md](agent-step-plan-shape.md).
 
 ## Pattern 1 — uniqueness validation against a source array, not a folded accumulator
 
@@ -206,15 +206,101 @@ Any agent step that has its own per-agent slice of a shared multi-tenant table (
 
 The else-branch's literal `0` avoids the `fold over zero solutions` no-return entirely.
 
-## Why these three patterns belong together
+## Pattern 4 — LLM instruction specificity for audit/verification roles
 
-All three are encountered in the **write half** of an agent step — the phase after the LLM produces structured output, before the implementation returns its Result envelope. They cohere as one shape because they share invariants:
+**Discovery context.** The Format-phase LLM in the MAB Analyst step was instructed to "re-validate accepted drafts against hard rules implied by the Brief." It faithfully produced a Critic section asserting "All accepted drafts include working URLs" — without re-reading a single copy body. The dominant signal in its context was the Critic's `decision=accept` column, which it summarised rather than treating as an input to re-check.
+
+### Why high-level audit instructions fail
+
+An LLM has multiple signals in context at once: structured JSON output from prior steps, prose instructions, and example outputs. When the instruction says "re-validate" but the input contains a pre-computed verdict (e.g., `decision=accept`), the LLM will summarise the verdict. The verdict is a higher-quality signal than raw data — it was produced by a dedicated prior step — so the LLM treats it as the answer, not as a data column to audit against independently.
+
+The failure is silent. The LLM produces a well-structured output that looks like it performed validation, because it did perform it — against the downstream signal rather than the upstream source. No parse error, no no-return. The output is simply sourced from the wrong layer.
+
+### The four-part specificity rule
+
+To force primary-source validation, the system prompt must specify all four of the following:
+
+**1. The exact data structure to iterate.**
+
+Wrong: `"re-validate accepted drafts against the hard rules"`
+
+Right: `"for every draft where decision=accept in the critiques array"`
+
+The LLM must be told which key in which object to filter on. Without the key name, it will iterate whatever feels most natural — typically the verdict column it already has.
+
+**2. The exact field to read from source.**
+
+Wrong: `"check the copy content"`
+
+Right: `"read the content field from the copy array for that treatment_id+draft pair"`
+
+The LLM must be told the field name (`content`), the table it lives in (`copy array`), and how to key into it (`treatment_id+draft pair`). Without this, "check the copy content" is satisfied by reading `critiques[].decision` — that IS copy-related content in the LLM's view.
+
+**3. The exact condition to check.**
+
+Wrong: `"verify URLs are present"`
+
+Right: `"check each email object for presence of http:// or https://"`
+
+The LLM must be given a concrete boolean test — a literal string to grep for, a field name to compare, a value to match. "Verify URLs" is ambiguous. The `http://` / `https://` check is not.
+
+**4. The expected failure output.**
+
+Wrong: `"report any violations"`
+
+Right: `"if no URL found in any email, name the draft and the failing check"`
+
+Without a failure output template, the LLM will surface only the summary verdict if all checks pass (which they appear to, because it sourced from the prior verdict column). The failure template forces the LLM to exercise the check against data — not to confirm the existing verdict.
+
+### Example directive
+
+This is the IMPORTANT paragraph added to the MAB Analyst Think-phase directive after the J.1 failure:
+
+```
+IMPORTANT: Re-validation means primary-source reading.
+For every draft where decision=accept in the critiques array:
+  1. Look up that draft's entry in the copy array by matching treatment_id and name.
+  2. Read the content field. Iterate every email object in content.
+  3. Check each email for presence of "http://" or "https://" anywhere in its body or subject fields.
+  4. If no URL is found in any email for this draft, include a failing-check entry:
+     {"draft": "<name>", "check": "url-presence", "result": "FAIL", "detail": "no http/https found in any email body or subject"}
+  5. If every email has at least one URL, mark the check passed.
+Do NOT infer URL presence from the Critic's decision=accept. Read the content field directly.
+```
+
+The five steps mirror the four-part rule exactly: step 1-2 = exact data structure + exact source field, step 3 = exact condition, step 4 = failure output template, step 5 = explicit instruction to not summarise from the verdict.
+
+### Generalising
+
+Any agent step where the LLM must audit, validate, or verify source data — not just synthesise conclusions from prior agents — must use field-level instruction specificity. The pattern is:
+
+- **Iteration target**: name the key and the filter (`for every X where field=value in array`)
+- **Source field**: name the table, the key, and the traversal path (`read field F from table T for the row matching K1=v1, K2=v2`)
+- **Boolean test**: state the exact check, not the category (`contains http:// or https://`, not `has a URL`)
+- **Failure template**: give the LLM a concrete failure record shape (`{"draft": ..., "check": ..., "result": "FAIL", "detail": ...}`)
+- **Explicit non-inference**: state which prior output to NOT source from (`Do NOT infer X from the prior step's Y`)
+
+The explicit non-inference line is the most frequently omitted. Without it, the LLM will source from the highest-quality signal it has — which is typically the upstream verdict, not the raw source data the audit is supposed to check.
+
+### Forecasting future agents
+
+Any agent step that:
+- Has a "verification" or "quality check" role description in its spec,
+- Receives both a structured verdict (decision, score, status) AND the raw data that verdict was derived from,
+- And is instructed to "re-check" or "re-validate,"
+
+…is a candidate for this failure. The spec instruction "re-validate X against Y" is not sufficient; all four parts must appear in the system prompt.
+
+## Why these four patterns belong together
+
+All four are encountered in the **write half** of an agent step — the phase after the LLM produces structured output (or must produce it by reading source data), before the implementation returns its Result envelope. They cohere as one shape because they share invariants:
 
 - The LLM emits an array of records that must be validated for invariants the LLM didn't enforce → Pattern 1.
 - The records must be batched into a primary table whose row shape determines the write strategy → Pattern 2.
 - The agent records its reasoning into a per-agent slice of a shared Memory table whose existence guard must be agent-scoped → Pattern 3.
+- When the LLM's role is audit or verification, the system prompt must specify the exact data path, field, condition, and failure output — otherwise the LLM will summarise from prior verdicts instead of re-reading source data → Pattern 4.
 
-Cargo-culting one pattern without the other two leaves a hole the next agent's first run will fall into. The three together form the minimum write-discipline kit for any new MAB-style agent step.
+Cargo-culting one pattern without the others leaves a hole the next agent's first run will fall into. The four together form the minimum write-discipline kit for any new MAB-style agent step.
 
 ## Related
 
