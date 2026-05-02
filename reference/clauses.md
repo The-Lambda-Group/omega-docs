@@ -33,6 +33,42 @@ The canonical shape for a workflow OnEvent or other large entry-point clause is:
 - **Write helpers** (one per destination), each invoked via `(call WriteHelper ...)` from a parent clause.
 - **A thin entry-point clause** (OnEvent, Run, Install, etc.) — usually 5–15 lines — that captures the top-level helpers and orchestrates the sequence of `(call ...)` invocations. The entry-point body is mostly pipe and gating, not logic.
 
+### Call graph shape
+
+Every impl has a **call graph** — the directed tree of `(call X ...)` invocations rooted at OnEvent. The shape of that tree determines whether you can verify the impl incrementally or must push everything at once.
+
+**The rule: 2–4 children per non-leaf clause.** A non-leaf clause is one whose body contains one or more `(call HelperX ...)` invocations. Each such call is one child edge. The rule caps the out-degree:
+
+- **Leaf clauses** do real work: one `prop-vals-by-folder` scan, one `write-table` batch, one `string-concat` chain. They have no `(call ...)` invocations in their body — only built-in terms.
+- **Non-leaf clauses** orchestrate: their body is mostly `(call Child1 ...)`, `(call Child2 ...)`, `(call Child3 ...)`. Keep it to 2–4 calls. At 5+ children the clause is a flat orchestrator — see anti-pattern below.
+- **Top-level OnEvent** orchestrates 2–3 phase-level orchestrators, not 10+ leaves directly.
+
+**Why this matters for verification.** The tree structure directly enables the incremental verification discipline in [develop-oql.md](../how-to/develop-oql.md): verify each leaf in isolation first, verify each sub-tree once its leaves pass, verify integration last. With a flat orchestrator calling 17 helpers in sequence, one `qo run` tests all 17 simultaneously — there is no incremental verification path. With a balanced tree, each node is independently testable.
+
+**Captures follow the tree.** Because [captures are not transitive](#closures--capture), the `{"capture" [...]}` list on each clause declares only its **direct children** — the helpers it calls via `(call ...)`. This is a natural fit for a 2–4 child tree; it becomes unwieldy when a flat orchestrator must capture 10+ symbols at once.
+
+**Concrete example tree** for a two-LLM-call agent step:
+
+```
+OnEvent
+├── ResolveCtx           (leaf: page-walk, db-id lookups)
+├── ProcessThinkPhase
+│   ├── ReadThinkInputs  (leaf: prop-vals-by-folder + filter)
+│   ├── BuildThinkMsg    (leaf: string-concat, get-in)
+│   └── FetchThinkResp   (leaf: http-request to AI connector)
+└── ProcessFormatPhase
+    ├── ReadFormatInputs (leaf: prop-vals-by-folder + filter)
+    ├── BuildFormatMsg   (leaf: string-concat, get-in)
+    ├── FetchFormatResp  (leaf: http-request to AI connector)
+    └── WriteResults
+        ├── WriteAllRows (leaf: write-table batch)
+        └── WriteBlocks  (leaf: run-term per-row add-or-get-by-name)
+```
+
+OnEvent has 3 direct children. Each phase orchestrator has 3–4 children. Every leaf does exactly one thing. The capture list at each level names only that level's direct children.
+
+**The flat anti-pattern.** An OnEvent that directly calls `ResolveCtx`, `ReadInputs`, `BuildMsg`, `FetchResp`, `ParseResp`, `ValidateResp`, `FilterResults`, `BuildRows`, `WriteRows`, `WriteBlocks`, `WriteMemory`, `BuildResult` — 12 sequential `(call ...)` lines — is a flat orchestrator. A runtime failure anywhere in that body is hard to bisect: you can strip the tail but cannot independently verify the middle. Restructure into 2–3 phase orchestrators first, then verify each phase independently.
+
 ### Working exemplar
 
 The MAB Strategist post-refactor implementation is the canonical cargo-cult shape: 19 helpers each 5–10 lines, OnEvent body 11 lines (`~/Development/wttc/mab/impl/a24d83d6-workflows/83f5d9b7-design/b07b8100-mab-strategist/e9ca2103-implementation.oql`, commit `b779ca8`). Sketch:
