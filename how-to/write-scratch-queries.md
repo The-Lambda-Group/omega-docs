@@ -22,3 +22,42 @@ Unlike implementation files (where clauses return via the head binding), scratch
 The 500 has no details, so the natural debugging path is: "what specifically failed?" leads to checking error shapes, then datastore paths, then reading more code. The actual problem — a structurally incomplete query — is never on that path because the query *looks* valid. You have to step back to "is my query structurally complete?" which is a basic language concern, not a runtime concern.
 
 If you get a bare 500 from a scratch query, check for `(return [...])` first.
+
+---
+
+## Declare every datastore the scratch file uses
+
+`(datastore X "uri")` declarations are scoped to the file's execution context. They do **not** persist globally in the engine for other files to use.
+
+Deployed clauses (defined with `:-`) work fine without a re-declaration in your scratch file because the engine serializes the URI string into the stored clause body in CouchDB. When the clause runs, the URI is already embedded. But a top-level scratch query that names the same datastore symbol is just a bare Clojure symbol until you declare it in *this* file. The engine receives a symbol, not a resolved Datastore protocol record, and the runtime dispatch fails.
+
+**Symptom:** `No implementation of method: :query of protocol: #'omega-db.datastore/Datastore found for class: clojure.lang.Symbol`
+
+The `clojure.lang.Symbol` in the error is the giveaway — the datastore name resolved as a symbol, not a datastore record.
+
+**Fix:** Add `(datastore X "uri")` at the top of any scratch file that references the datastore, using the URI from the deployed `.oql` file where the datastore was originally declared.
+
+```oql
+;; WRONG — clojure.lang.Symbol error even though app.oql declares this datastore
+(enable-full-scan)
+(Qo.Schema.App.Data/app _ AppData)
+(disable-full-scan)
+(get AppData "name" AppName)
+(get AppData "owner-email" OwnerEmail)
+(return [AppName OwnerEmail])
+
+;; RIGHT — declare the datastore at the top of this scratch file
+(datastore Qo.Schema.App.Data "omega/query-omega/schema/app/data")
+(enable-full-scan)
+(Qo.Schema.App.Data/app _ AppData)
+(disable-full-scan)
+(get AppData "name" AppName)
+(get AppData "owner-email" OwnerEmail)
+(return [AppName OwnerEmail])
+```
+
+To find the URI for a datastore, look for its `(datastore ...)` declaration in the deployed `.oql` file that owns it (e.g. `~/Development/omega/query-omega-oql/oql/app/app.oql` declares `(datastore Qo.Schema.App.Data "omega/query-omega/schema/app/data")`).
+
+### Why this differs from stored clauses
+
+Inside a stored clause body, you must also re-declare any datastore the clause references (the top-level `(datastore ...)` is stripped from the stored body during serialization). The same scoping rule applies in both cases — each execution context is isolated — but the symptom path is different: deployed clauses fail silently or produce no-return; scratch files fail immediately with the `clojure.lang.Symbol` protocol error.
