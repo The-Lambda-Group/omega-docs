@@ -57,7 +57,7 @@ A list of every doc the implementer must have read before any code change in the
   ### THE SINGLE MOST IMPORTANT DOC — read this twice, internalize it before any code change
 
   - **`omega-docs/how-to/develop-oql.md`** — the consolidated authoring + triage manual.
-    The "Operating manual (re-read every session)" 8-rule TLDR at the top is non-negotiable.
+    The "Operating manual (re-read every session)" 9-rule TLDR at the top is non-negotiable.
     Probe-don't-build, Result-as-inspection-channel, the verb shift for LLMs, two worked
     examples, wall-clock-as-cardinality-signal heuristic.
 
@@ -70,6 +70,7 @@ A list of every doc the implementer must have read before any code change in the
   - [how-to/narrow-an-oql-failure.md](narrow-an-oql-failure.md)
   - [how-to/triage-no-return.md](triage-no-return.md)
   - [how-to/debug-by-returning-early.md](debug-by-returning-early.md)
+- **If the plan ends in live verification of a deployed impl, the task list and pre-flight rules must require one stored-entrypoint probe before any live LLM/write run.** The probe is: static scan that every helper in each `{"capture" [...]}` vector is defined earlier than the capturing clause, then `qo push` a production-shaped `OnEvent` with one downstream phase temporarily reduced to a constant payload, then `qo run` the stored impl through its real entrypoint. Copied scratch probes are not enough for this class.
 - The OQL discipline references:
   - [reference/oql-hard-rules.md](../reference/oql-hard-rules.md)
   - [reference/control-flow.md](../reference/control-flow.md)
@@ -101,7 +102,7 @@ Use this as starting text. Edit the bullets to match the plan's actual scope.
 ### THE SINGLE MOST IMPORTANT DOC — read this twice, internalize it before any code change
 
 - **`omega-docs/how-to/develop-oql.md`** — the consolidated authoring + triage manual.
-  The "Operating manual (re-read every session)" 8-rule TLDR at the top is non-negotiable.
+  The "Operating manual (re-read every session)" 9-rule TLDR at the top is non-negotiable.
   Probe-don't-build, Result-as-inspection-channel, the verb shift for LLMs, two worked
   examples, wall-clock-as-cardinality-signal heuristic.
 
@@ -182,8 +183,9 @@ A numbered list of rules that the implementer re-reads before EVERY push. Not on
 15. **Total expected wall-clock > 5 minutes → STOP, ASK USER.** Even if every individual call is fast. Even if a plan-text Expected says it's authorized. Multi-minute autonomous runs during development are almost always wrong — verification doesn't require exhaustive drains. Verify the loop on a handful of iterations (5–10), then ask whether the user wants the full operational run before continuing. **Do not auto-rationalize "the plan says 30 min, so it's fine."**
 16. **Verification scope ≠ operational scope.** Verification = "does the loop work" (≤10 iterations, < 1 minute). Operational = "drain all N items end-to-end." If the plan asks for an operational-scale run as part of "verification," that is a plan defect — defer the operational portion, surface to the user, ask before doing it.
 17. **Mid-task time-budget check.** If you find yourself thinking "this will take ~N minutes" and N > 5, STOP before kicking it off. Surface to the user.
+18. **Before live verification of a deployed impl, prove the stored entrypoint with `qo run`.** Do a static capture-order scan, then push a production-shaped `OnEvent` with one downstream phase temporarily reduced to a constant payload and run it through the real stored entrypoint. Copied scratch probes do not test stored implementation capture resolution.
 
-**Project-specific rules append after the universal list, numbered to continue.** Example from the LS plan: rules 18–28 covered LS-specific concerns (provider returns empty on cold-start, K=40 per-arm `run-term` discipline, count-as-cursor invariant). Author appends similar rules per plan.
+**Project-specific rules append after the universal list, numbered to continue.** Example from the LS plan: rules 19–29 would cover LS-specific concerns (provider returns empty on cold-start, K=40 per-arm `run-term` discipline, count-as-cursor invariant). Author appends similar rules per plan.
 
 ### Cargo-cult template
 
@@ -211,15 +213,16 @@ Project-specific extensions follow.
 15. Total expected wall-clock > 5 min → STOP, ASK USER.
 16. Verification scope ≠ operational scope.
 17. Mid-task time-budget check (N > 5 min → STOP).
+18. Before live verification of a deployed impl, prove the stored entrypoint with `qo run`.
 
-<!-- project-specific rules continue here, numbered 18+ -->
-18. <project-specific rule, e.g. "Provider returns no-return → Phase 0 audit re-runs.">
-19. <...>
+<!-- project-specific rules continue here, numbered 19+ -->
+19. <project-specific rule, e.g. "Provider returns no-return → Phase 0 audit re-runs.">
+20. <...>
 ```
 
 ### Project-specific extension points
 
-When adding rules 18+, follow the same shape: short imperative title, one-line rationale, what to do (STOP / surface / re-run audit / etc.). Stop conditions in the next section overlap with these — Pre-flight Rules are continuous (re-read every push), Stop Conditions fire once.
+When adding rules 19+, follow the same shape: short imperative title, one-line rationale, what to do (STOP / surface / re-run audit / etc.). Stop conditions in the next section overlap with these — Pre-flight Rules are continuous (re-read every push), Stop Conditions fire once.
 
 ---
 

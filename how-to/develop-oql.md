@@ -16,6 +16,7 @@ These rules are what to actually do, in order. The rest of the doc is rationale.
 6. **Failures are data, not setbacks.** A failing run tells you the boundary. Sometimes you deliberately run something you expect to fail just to see *how* it fails. Don't gear-shift into recovery-mode when a probe fails — read the error, comment out the offending term, run the next probe.
 7. **Iteration size matches your uncertainty, not a rule.** When you don't know what's happening, change one line and run. When you've just confirmed the previous probe and are laying down known-good structure, you can change five or ten lines. Bias toward small when in doubt.
 8. **Killing the omega-cli process does NOT stop the server.** A hung query keeps running on the engine until it completes or times out. If you've launched a hang, don't launch another — wait for the engine to drain, or accept that the next several probes will be slow until it does.
+9. **Before live verification of a deployed impl, prove the stored entrypoint with `qo run`.** Copied scratch probes do not exercise stored implementation capture resolution. First scan every `{"capture" [...]}` vector and confirm each captured helper is defined earlier in the file than the clause that captures it. Then push a production-shaped `OnEvent` with one downstream phase temporarily reduced to a constant payload and run it through `qo run`. If runtime throws `run-with-args ... clojure.lang.Symbol`, inspect the deepest `(call SomeHelper ...)` frame and suspect capture resolution / definition order before you blame the helper body.
 
 If at any point you notice you're not following these — you're adding helpers/error-handling/captures to "fix" something, you're back-pedalling between named "Steps", you're proposing theories before running probes — stop, re-read this section, and pick the next probe.
 
@@ -203,6 +204,25 @@ For a deployed implementation under iteration, the file registers clauses and On
 ```bash
 qo push impl/.../file.oql && qo run "Component Installs/.../Page" -p "Event Handler" -m on-event -a '[{}]'
 ```
+
+### Stored entrypoint probes: scratch copies are not enough
+
+When the target is a **deployed implementation** with captured helper phases, you must prove the behavior of the **stored** entrypoint, not only a copied scratch file. A scratch copy can pass while the deployed impl still fails, because scratch copies do not exercise stored implementation capture resolution in the same way as `qo push` + `qo run`.
+
+Use this pre-live sequence:
+
+1. **Static capture-order scan.** For every clause with `{"capture" [...]}`, confirm every captured helper is defined earlier in the file than the capturing clause. No forward captures.
+2. **Stored-entrypoint probe.** Keep the production-shaped `OnEvent`, temporarily reduce one downstream phase helper to a constant payload (for example `{"status" "probe-ok"}`), `qo push`, then `qo run` the stored impl through its real entrypoint.
+3. **Only then restore the real phase body** and proceed to live LLM/write verification.
+
+Why this exists: forward captures can push cleanly but fail only at stored-runtime dispatch with:
+
+```text
+omega/jvm/IllegalArgumentException
+No implementation of method: :run-with-args ... found for class: clojure.lang.Symbol
+```
+
+The useful stack is usually the deepest `(call SomeHelper ...)` frame. If you replace `SomeHelper`'s body with a constant payload and the Symbol error stays at the same `(call SomeHelper ...)` site, the helper body is not the cause. The captured helper value is resolving as a symbol, which usually means capture order / definition order is wrong.
 
 During heavy iteration on an OnEvent body, the cleanest setup is: comment out the `set-implementation-clauses` block at the bottom of the file and replace it with a direct call:
 
