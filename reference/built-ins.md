@@ -302,6 +302,44 @@ Same pattern for datastore operations like `set-data`:
 
 Any term accepts its arguments as values, not as expressions — the argument position is a value slot. When you write a literal map directly in the call site, OQL reads it as a literal value before evaluating expressions. Only when the map is bound to a symbol via `(=)` does the binder first evaluate the expressions inside the map and then assign the result.
 
+This also applies to inline key vectors passed to index terms. If you call `row-index` or `sec-index` with a list literal that contains a bound symbol, the symbol does not resolve inside the inline list. Bind the key list first, then pass the symbol:
+
+```oql
+;; WRONG — Tid stays symbolic inside the inline list
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId [Tid] RowPageId)
+
+;; RIGHT — bind the key vector first
+(= RowKey [Tid])
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId RowKey RowPageId)
+```
+
+For composite keys, use the same pattern:
+
+```oql
+(= RowKey [TreatmentId Draft])
+(Qo.Public.OqlApi.Db.Prop/row-index CopyDbId RowKey RowPageId)
+```
+
+If `row-index` or `sec-index` appears to fan out across many rows, check this literal-argument rule before assuming the table has duplicates or the index itself is broken. For the broader lookup reliability issue, see [sec-index and row-index do not reliably filter rows](../gotchas/sec-index-composite-key-fails.md).
+
+There is also an observed list-wrapper edge case that is distinct from the separate 9+ map-literal bug. A bound map can still leak through as a symbolic placeholder when you wrap it in an inline one-element list literal:
+
+```oql
+;; Empirically unsafe for map payloads like next-args
+(= NextArg {"step" "Load Subjects" "skip" NextSkipStr "limit" BatchSize})
+(= NextArgs [NextArg])
+```
+
+In the 2026-05-04 MAB Critic Task 15 result envelope, the safe workaround was to bind the map first and then build the list through `fold` + `append`:
+
+```oql
+(= NextArg {"step" "Load Subjects" "skip" NextSkipStr "limit" BatchSize})
+(fold [] NextArg append NextArgs)
+(= Result {"has-more" "true" "next-args" NextArgs})
+```
+
+Use this pattern when a term or return envelope needs a list of maps and the list would otherwise be written as an inline literal around a bound map. This is **not** the same failure as the 9+ entry map-literal threshold bug: that bug affects large map binds and is worked around by splitting the map and merging the parts, while this list-wrapper case can happen with a single small map.
+
 ## HTTP
 
 **`http-request`** is the general-purpose HTTP term and the only safe HTTP primitive. It takes a request map and returns a response map. The request map is passed directly to the underlying HTTP client ([clj-http](https://github.com/dakrone/clj-http)), so all clj-http options are supported.

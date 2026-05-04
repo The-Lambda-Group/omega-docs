@@ -12,6 +12,33 @@
 
 The symptom is a silent full-scan: instead of binding `Pid` to the single matching row-id, the term binds it to every row-id in the folder, and downstream reads or writes fan out across all rows.
 
+## Distinct failure mode: inline key literals with symbols
+
+Not every `row-index` fan-out means the table has duplicate rows or that the index lookup itself is broken. A separate OQL rule applies when the key argument is written inline as a list literal containing symbols:
+
+```oql
+;; WRONG — Tid does not resolve inside the inline literal
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId [Tid] RowPageId)
+```
+
+In that form, OQL reads `[Tid]` as a literal list before row bindings are applied, so `Tid` stays symbolic instead of becoming the actual key value. The practical symptom can look like the broader `row-index` gotcha: the call fans out or otherwise fails to target the single intended row.
+
+The workaround is to bind the key vector first, then pass that bound symbol to `row-index`:
+
+```oql
+(= RowKey [Tid])
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId RowKey RowPageId)
+```
+
+This same bind-first rule applies to composite keys:
+
+```oql
+(= RowKey [TreatmentId Draft])
+(Qo.Public.OqlApi.Db.Prop/row-index CopyDbId RowKey RowPageId)
+```
+
+During the 2026-05-04 MAB Critic full-page audit, this exact pattern resolved a misdiagnosed Strategy lookup. `qo describe Strategies` showed the table PK was `["treatment_id"]`, and direct verification showed 27 unique Strategy treatment IDs with no duplicates. The issue was the inline `[Tid]` literal, not duplicate Strategy rows.
+
 ## Why this matters
 
 Code that looks correct — passing exactly the right key vector — silently returns the wrong result set. There is no error or Mango throw; the query succeeds with extra rows. Downstream logic (writes, aggregations, existence checks) operates on all rows rather than the target row.
@@ -72,8 +99,16 @@ Reference implementations: `ReadCopyContent` and `WriteCritiqueNotes` in the MAB
 
 Both forms above silently fan out. There is no engine error — the failure is a wrong result count.
 
+If the key comes from a bound symbol, also avoid writing the list inline. Bind it first:
+
+```oql
+(= RowKey [KeyValue])
+(Qo.Public.OqlApi.Db.Prop/row-index TableId RowKey RowPid)
+```
+
 ## Cross-references
 
 - `omega-docs/gotchas/conventions.md` § Index matching rules — covers the general rule that index variables must match exactly; this doc covers the empirical failure mode where matching correctly still produces a full scan.
+- `omega-docs/reference/built-ins.md` § Symbols in Literal Arguments — explains why inline map/list literals do not resolve bound symbols, including the `row-index` key-vector pattern documented above.
 - MAB session 2026-04-29 Phase 1, commit `8507532` — single-column PK discovery on Campaign Analytics.
 - `gap-sec-index-composite-key-fails` and `gap-sec-index-composite-key-fails-extension` in `omega-knowledge-base/gaps.md` — gap records with full fallback-source detail.
