@@ -30,6 +30,10 @@ This bucket owns the public OQL language reference and public API surface. Inter
 
 - [Query execution](query-execution.md) -- The `with-skip`/`with-limit` constraint for CouchDB view pagination. Covers the critical limitation that skip/limit only work when the runtime resolves through a view index -- when it falls back to Mango scan, skip/limit are silently ignored and the query returns up to 1,000,000 rows. Keywords: with-skip, with-limit, pagination, view index, Mango scan, silent bug, page-query, CouchDB.
 
+### Workspace conventions
+
+- [Docs folder convention](docs-folder-convention.md) -- Where synced project doc trees live in an OmegaAI workspace and how they are named. All doc trees live under `Docs/` at the workspace root; each project gets a subfolder named with its display name (e.g. `Docs/MAB`, `Docs/Redefine Reach`). Keywords: Docs folder, workspace layout, synced docs, doc tree, pages directory, qo doc push, display name, subfolder naming.
+
 ### API & protocols
 
 - [Public API](api.md) -- Complete clause signature tables for all public OQL API datastores. Covers `Qo.Public.OqlApi.Page` (page tree navigation/mutation), `Qo.Public.OqlApi.Page.Bl.LogStream` (log stream blocks), `Qo.Public.OqlApi.Page.Bl.PushCon` (push connector blocks), `Qo.Public.OqlApi.Comp` (component definitions), `Qo.Public.OqlApi.Proto` (protocol definitions), `Qo.Public.OqlApi.Impl` (implementation management), `Qo.Public.OqlApi.Db.Prop` (database property system -- schema, primary keys, indexes, table writes, truncation), `Qo.Public.OqlApi.PageSub` (page event subscriptions), `Qo.Public.Api.Run` (run implementations by page reference/ID), and `Qo.Public.Api.LogStream` (read log streams). Keywords: public API, Qo.Public, clause signature, page, component, protocol, implementation, database, property, subscription, run, log stream.
