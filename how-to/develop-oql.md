@@ -290,6 +290,43 @@ This stub verifies:
 
 **Only restore the full production OnEvent when the plan task explicitly says "test end-to-end behavior."** That is the one task where side effects are the point — you want the LLM to fire, the writes to land, and the output to be real. Every other restore-for-deploy checkpoint should use the safe stub.
 
+### Between tasks: keep the smallest verified probe deployed, not the safe-restore stub
+
+The previous section covers *within-task* safe restore — what to deploy when a task ends with "restore and push to confirm." This section covers *between tasks* — what should be sitting in the engine while a plan is paused between task boundaries.
+
+**Rule:** the deployed OnEvent between synthetic-development tasks must be either the last verified no-write probe or a safe-restore stub. Never the full production OnEvent body.
+
+The distinction matters because the safe-restore stub (calling `ResolveXxxCtx` and returning the sentinel) is itself a step up from a bare probe — it resolves the full capture chain, builds the context, and returns. That is appropriate at the *within-task* restore checkpoint. Between tasks the simpler shape is often correct: the last probe that was verified to produce no writes, return correct shape, and cost nothing.
+
+**Why the full production body must never sit deployed between tasks:**
+
+If the production OnEvent has side effects — LLM calls, `write-table` writes, Memory writes, Reports rows — any accidental trigger (a Coordinator firing, a test invocation by the next task's agent, or an operator sanity check) fires those side effects silently. There is no error. The run "succeeds." The cost is invisible.
+
+This is distinct from the within-task rule. Within a task the risk is that the plan *explicitly instructs* the agent to restore the production OnEvent "to confirm the restore works." Between tasks the risk is that no one instructs the agent to do anything — the impl just sits deployed and waits, and if something triggers it the full production path runs.
+
+**Correct between-task deployed states (in order of preference):**
+
+1. **Last verified no-write probe.** The simplest shape: `(= Result {"status" "probe-ok"})` or whatever the current phase's final verified probe was. Zero side effects, zero LLM budget.
+2. **Safe-restore stub.** Calls the context-resolver helper, returns the sentinel. More verification than a bare probe (tests capture resolution), but still zero side effects.
+
+**Incorrect between-task deployed states:**
+
+- The full production OnEvent body.
+- Any OnEvent that calls `dispatch-llm` / `call-llm` / the agent's LLM dispatch helper.
+- Any OnEvent that calls `write-table`, `add-or-get-by-name!`, or any write-path helper.
+
+**The canonical safe-restore stub** (repeated here for reference, with the generic form):
+
+```oql
+(:- (OnEvent Exec Result {"capture" [ResolveCriticCtx]})
+    (call ResolveCriticCtx Exec Ctx)
+    (= Result {"has-more" "false" "status" "safe-restore"}))
+```
+
+Swap `ResolveCriticCtx` for your agent's context-resolver. The result envelope `{"has-more" "false" "status" "safe-restore"}` is always correct — it is a recognisable sentinel and its shape satisfies the Coordinator's envelope contract without triggering pagination.
+
+**Only restore the full production OnEvent body inside a task that explicitly gates live LLM / write access** — with `dry-run + test-llm-resp` probes or explicit user approval as the task's stated entry condition. That task is the single point where side effects are intentional and controlled. Everything else — all other tasks, all between-task pauses — must leave the deployed state no-write.
+
 ## Operating the loop forward: authoring
 
 Each iteration adds one verifiable piece. The loop:
