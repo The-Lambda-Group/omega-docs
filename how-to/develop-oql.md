@@ -189,6 +189,28 @@ You don't need precise numbers. The signal is the *delta*: if probe N+1 takes 10
 
 A subtle but important point: a hung omega-cli kill on the client does **not** stop the server. The query keeps running on the engine until it completes or the request times out, which can be a long time. Kill stresses the engine cumulatively if you keep launching new hung queries. When wall-clock starts climbing, treat the next probe as a chance to *reduce* cardinality first (add a fold, narrow a sec-index lookup, wrap an iteration in a helper) before adding any new logic.
 
+#### Slow probe: one narrower cardinality probe allowed, then stop
+
+A slow non-LLM, non-HTTP probe is a **cardinality signal**, not an automatic panic. The agent may run **one** narrower cardinality/shape probe in response. The thresholds:
+
+| Wall-clock | Action |
+|---|---|
+| > 30s | One narrower probe allowed — if and only if the narrower probe clearly reduces the call stack or explains the shape. No further probes after that, regardless of outcome. |
+| > 60s | Hard stop immediately. No follow-up probes. |
+
+"Narrower" means concretely smaller: shorter helper chain, smaller data set, or a cardinality check (`(length List Count)`) rather than a full body run. If you can't describe up front why the follow-up probe reduces scope, it does not qualify — stop instead.
+
+#### Expected-slow calls are not cardinality signals
+
+This rule applies to **local OQL probes** — queries that run against the engine without crossing an external boundary. It does **not** apply to calls whose latency is intrinsically external:
+
+- **Live LLM calls** (`call-llm`, `dispatch-llm`, `http-request` to an LLM endpoint) — latency is inherent; a 20–60s response is not a cardinality signal. These are governed by task-specific limits and explicit approval gates (see the operating manual above and the plan pre-flight rules), not by this wall-clock rule.
+- **HTTP requests to third-party services** (SmartLead, HDC, any remote API) — latency is network-bound. Slow responses there reflect the external service, not engine cardinality.
+
+If a probe calls a live LLM or an HTTP endpoint and returns slowly, do not run a narrower cardinality probe in response. That call was expected to be slow. Evaluate it under the task's approval conditions instead.
+
+The distinction in practice: if you look at the probe and see `call-llm` or `http-request` in the call stack, you are in expected-slow territory. If the probe is pure OQL against the engine (page walks, table reads, helpers, folds), you are in cardinality-signal territory and the thresholds above apply.
+
 ## The push-run cycle
 
 For top-level scratch queries (one-off inspection, not a deployed implementation):
@@ -373,6 +395,38 @@ If you need to stringify a field, get it, stringify it, set it back — three li
 Triage is the same loop in subtractive direction. Authoring runs forward — add one step, verify. Triage runs backward — strip one step, verify. Both depend on the same tight feedback cycle. The same rules about probing apply with extra force, because failures are exactly when LLMs slide hardest into theorize-and-build mode.
 
 Every rule below produces an **artifact**. A minimum-repro command, a ruled-in/out list, a written Observed/Hypothesis/Test trio. If you finish triage without writing anything concrete down, you ran on vibes and you're going to ship a non-fix.
+
+### Plan-dispatch context: stop rules and the one-probe allowance
+
+The rules in this triage section are written for **interactive OQL authoring**, where you are the operator at the REPL and can run as many probes as your time allows. In **plan-task execution** — where a subagent is running a verification probe as a step in a dispatched plan — a tighter stop discipline applies. The difference is intentional: a subagent accumulating probes silently costs LLM budget and pollutes the transcript; you as the operator can decide how much to poke.
+
+**Plan-dispatch stop rules:**
+
+After the first unexpected output shape, empty output, parse failure, no-return, or write-path surprise, the agent **MAY run ONE bounded diagnostic Result probe** — if and only if all three conditions hold:
+
+- **(a)** The probe narrows the call stack rather than broadening it (commenting out terms, redirecting Result to an earlier intermediate — not adding new calls or expanding scope).
+- **(b)** The probe cannot call the live LLM (no `call-llm`, `dispatch-llm`, or any helper that invokes them).
+- **(c)** The probe cannot write tables (no `write-table`, `add-or-get-by-name!`, or any write-path helper).
+
+**Hard stops — no further probe allowed:**
+
+- Same symptom on the diagnostic probe as on the original probe (the diagnostic didn't narrow anything).
+- Three failed queries in a row, regardless of symptom similarity.
+
+When a hard stop fires, the agent stops, reports the state, and waits for orchestrator direction. The orchestrator decides whether to issue a new sub-task, revert, or escalate to the user.
+
+**Why the one-probe allowance exists:** the original plan-task discipline required immediate stop on any unexpected result. In practice this prevented agents from running the one diagnostic probe that would have identified the issue — the information cost of stopping cold was higher than the cost of one more bounded probe. The allowance was introduced as a Ryan correction during the MAB Critic dry-run implementation (2026-05-05).
+
+**Wall-clock as a stop signal in plan-dispatch context:**
+
+A slow non-LLM, non-HTTP probe is a cardinality signal, not an automatic panic. The thresholds:
+
+- Over 30s: one narrower cardinality/shape probe allowed if it reduces the call stack or explains the shape.
+- Over 60s: hard stop regardless — report the wall-clock and the last known state to the orchestrator.
+
+Expected-slow third-party calls (live LLM, HTTP) are governed by task-specific limits and explicit approval gates, not these thresholds.
+
+**Contrast with interactive mode:** in interactive triage you can run as many probes as you need, with as much wall-clock patience as you choose. The one-probe limit and the 60s hard stop apply **only** in plan-dispatch context where an agent is executing a verification step autonomously. When you as the operator are at the REPL, the numbered rules below (minimum repro, shrink the frame, etc.) govern — no probe count limit.
 
 ### 1. Minimum reproduction is the first move, always
 
