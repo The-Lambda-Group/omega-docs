@@ -22,6 +22,12 @@ These are cross-cutting methodology docs for OQL work and superpowers plan/spec 
 
 ---
 
+### Deployment
+
+- [Deploy an implementation fix](deploy.md) -- How to deploy an OQL implementation fix to a running installed component after `qo push`. Explains the library-side vs installed-side distinction: `qo push` registers clauses on the dev/library impl-id only; the installed component has its own impl-id and requires a separate targeted deploy step via `omega-cli run-query`. Includes a lookup recipe for finding the installed impl-id and a concrete example from the 2026-05-06 MAB Copywriter triage. Keywords: qo push, installed component, library-side, impl-id, deploy, omega-cli run-query, set-implementation-clauses, component-id, deployed fix not live.
+
+---
+
 ### OQL development
 
 - [Debug by returning early](debug-by-returning-early.md) -- How to bisect a broken query by commenting out clauses and binding `Result` to a tuple of intermediate variables. Covers why tuples are better than `throw` (multi-row visibility), the HTTP debugging sub-recipe (inspecting request maps alongside responses to catch symbol-leak bugs), and iteration discipline (one change per run, include per-row identity). Keywords: debug, bisect, early return, tuple, throw vs tuple, HTTP debugging, intermediate state, comment out.
