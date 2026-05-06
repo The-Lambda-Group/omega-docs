@@ -52,6 +52,24 @@ When something breaks, comment out everything after the suspected failure point 
 
 If you need to stringify a field, get it, stringify it, set it back — three lines, return the result, verify. Don't combine stringify + write-table + count in one untested block.
 
+## Logic tree balance
+
+Two dimensions govern whether an OQL implementation stays manageable.
+
+**Table header branching factor.** The number of solutions a `with-table-if` condition or clause head produces is the branching factor at that level. Keep it ≤6; even 6 requires justification. Prefer ≤4. To understand why the ceiling matters: a branching factor of 6 at three nested levels produces 6³ = 216 candidate solutions; at 4 it is 4³ = 64. Combinatorial blowup from unconstrained branching is the most common cause of logic trees that are correct in isolation but slow or undebuggable at full scale.
+
+**Clause sub-clause count.** Each clause body should contain ≤4 sub-clauses or steps. Beyond four, the clause is doing too many things at once. Split it.
+
+### Pre-seed map as a concrete example
+
+The pre-seed map pattern keeps fold-body branching factor at 1. Before the fold begins, build a map that guarantees every expected key is present (using a default value for missing entries). Inside the fold body, `(get Map Key Val)` always resolves — it never widens the solution table because the key is always there. Compare this to a `with-table-if (get Map Key Val)` guard inside the fold body: if the map is missing keys, the condition fails for those rows and the else-branch fires, adding a branch. Seeding the map before the fold eliminates that branch entirely.
+
+This also avoids the 9-entry map literal binding bug: if the map has ≥9 keys, build it in two sub-maps of ≤8 keys each and merge them before the fold. Each sub-map's `(=)` bind resolves correctly; `(merge MapA MapB Out)` combines them without going through the broken pathway.
+
+### Cross-link
+
+For binding rules inside `with-table-if` — which symbols must appear in the header, condition vs branch scope — see [Control flow](../reference/control-flow.md).
+
 ## What NOT to do
 
 Don't write the entire query with HTTP call + JSON parse + field extraction + table write + error handling + count in one shot. It will fail somewhere in the middle and the 500 error won't tell you where. You'll waste time guessing and rewriting when you could have caught the issue in 30 seconds with an incremental test.
