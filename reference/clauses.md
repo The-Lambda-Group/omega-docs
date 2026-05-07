@@ -225,6 +225,21 @@ Clauses can capture symbols from the outer scope using the `capture` syntax:
     (+ A SomeOuterVar Result))
 ```
 
+> **The capture map must be the LAST element of the clause head tuple.** Placing `{"capture" [...]}` anywhere in the body is silently ignored — no error is raised, captures simply do not take effect. The runtime symptom is `count not supported on this type: Symbol`: the engine encounters a bare symbol where it expected a resolved clause.
+>
+> ```oql
+> ;; WRONG — capture map is the first body term; it is silently ignored
+> (:- (OnEvent Exec Result)
+>     {"capture" [ResolveCtx WriteResults]}
+>     (call ResolveCtx Exec Ctx)
+>     (call WriteResults Ctx Result))
+>
+> ;; CORRECT — capture map is the last element of the head tuple
+> (:- (OnEvent Exec Result {"capture" [ResolveCtx WriteResults]})
+>     (call ResolveCtx Exec Ctx)
+>     (call WriteResults Ctx Result))
+> ```
+
 This is the recommended workaround when you need a stored clause's result available inside an implementation clause. Define the stored clause at the top level (push time), create a functor for it, and capture the functor:
 
 ```oql
@@ -284,6 +299,30 @@ Do not build a multi-level orchestrator chain expecting captures to cascade down
 
 The rule: **every `(call X ...)` must have `X` in that clause's own `{"capture" [...]}`**. There is no capture inheritance across call boundaries.
 
+### Captured in-memory helpers are only callable from the clause that declared them
+
+This is a stronger constraint than the general non-transitivity rule above. A captured in-memory helper is callable only from the clause whose head declares the `{"capture" [...]}` — it is **not** callable from any clause that is itself invoked via `(call ...)` from that declaring clause.
+
+Concretely: `InstallBranch` captures `SetupQueries` and calls `(call RunInstall ...)`. Inside `RunInstall`, `SetupQueries` is not in scope — even though `InstallBranch` captured it. `RunInstall` was invoked via `(call ...)` and runs in its own scope with no visibility into `InstallBranch`'s captures.
+
+```oql
+;; FAILS — RunInstall tries to call SetupQueries, which was captured by InstallBranch,
+;;          not by RunInstall. SetupQueries is not in scope here.
+(:- (InstallBranch Exec Result {"capture" [SetupQueries RunInstall]})
+    (call RunInstall Exec Result))
+
+(:- (RunInstall Exec Result)
+    (call SetupQueries Exec SetupOut)   ;; ERROR: SetupQueries is a bare Symbol here
+    (= Result {"status" "ok"}))
+
+;; CORRECT — InstallBranch calls all helpers directly; no mid-chain delegation
+(:- (InstallBranch Exec Result {"capture" [SetupQueries]})
+    (call SetupQueries Exec SetupOut)
+    (= Result {"status" "ok"}))
+```
+
+The fix is always to flatten: the clause that has access to captured helpers must call them directly, not delegate to a mid-chain helper and expect the captures to flow through. This is a direct consequence of the non-transitivity rule — each call boundary is an opaque scope boundary.
+
 ### Related gotchas
 
 The capture mechanism interacts with several scoping and invocation rules documented in the gotchas tree. If you are diagnosing a runtime error that may originate in capture semantics, scan these:
@@ -292,3 +331,26 @@ The capture mechanism interacts with several scoping and invocation rules docume
 - [with-table-if header must include captured clause symbols](../gotchas/with-table-if-capture-header.md) — the per-branch scope-boundary corollary: even after capture has threaded a clause symbol into the surrounding clause body, a `with-table-if` branch needs that symbol listed in its header to see it.
 - [add-or-get-by-name binds the same block across multiple solution rows](../gotchas/add-or-get-by-name-multi-row.md) — when the fix is "wrap in a stored helper invoked via `run-term`," capture is how you hand the helper the bindings it needs from the surrounding scope.
 - [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) — capture targets must be stored functors when reached via `run-term`. Define the stored clause at the top level, build a functor, and capture the functor. **Default rule for in-memory captured helpers: use `call`. `run-term` against a captured in-memory helper is appropriate ONLY when replacing `with-group-by` (partition-before-fold scaling); in any other context it produces a 500 or engine spin-out / `ECONNRESET`.**
+
+## Implementation clause arity
+
+OQL always dispatches implementation (protocol method) clauses with exactly **2 positional args**: `Exec` and `Result`. The clause signature is always:
+
+```oql
+(:- (MyClause Exec Result)
+    ...)
+```
+
+**Extra method arguments are not passed as additional positional params.** They arrive inside `Exec` under `["args" 0 ...]` and must be extracted with `get-in`:
+
+```oql
+(:- (InstallBranch Exec Result)
+    (get-in Exec ["args" 0 "branch-name"] BranchName)
+    (get-in Exec ["args" 0 "library-id"] LibraryId)
+    ;; ... use BranchName, LibraryId ...
+    (= Result {"status" "ok"}))
+```
+
+Writing a 3-arg signature like `(:- (InstallBranch Exec Input Result) ...)` is wrong — the dispatcher always calls with 2 args, so the clause will never unify and the method call will return no-return.
+
+This applies to all implementation clauses registered via `set-implementation-clauses`: `install`, `on-event`, `run`, and any other protocol methods. The arity is always `(Clause Exec Result)` — 2 positional args, no exceptions.
