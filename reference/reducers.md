@@ -37,6 +37,20 @@ Reduces a symbol across all solutions in the table. The function is applied pair
 3. **Func** — the reducer function (`append`, `+`, `*`, or a custom clause)
 4. **Agg** — the output symbol that holds the final result
 
+> **Reducer functions are language primitives, not first-class values.**
+> `append`, `prepend`, `+`, `*`, and any other reducer are literal terms in the OQL grammar — they cannot be stored in a symbol or selected at runtime. Writing `(= Reducer "append") (fold [] Item Reducer List)` does not work; the engine will not resolve `Reducer` to the `append` primitive.
+>
+> If runtime logic (such as sort direction) determines which reducer to use, write two fully explicit branches and select between them with `with-table-if`:
+>
+> ```oql
+> ;; SortDir determines whether to build the list forward or reversed.
+> ;; Reducer cannot be stored in a symbol — each branch must name it literally.
+> (with-table-if (= SortDir "asc")
+>   [SortDir Rows]
+>   (fold [] Page append Rows)
+>   (fold [] Page prepend Rows))
+> ```
+
 ## with-unique-by
 
 OQL solution tables are unique by default — each row represents a unique combination of all bound symbols. `fold` reduces over these unique solutions, which means it deduplicates by the fold symbol automatically. For example, `(fold 0 Score + Total)` only sums unique values of `Score`.
