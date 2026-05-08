@@ -77,3 +77,22 @@ Don't write the entire query with HTTP call + JSON parse + field extraction + ta
 ## The push-run cycle is fast
 
 `qo push file.oql && qo run path -p Query -m run -a '[{}]'` takes seconds. There's no reason to batch work — the feedback loop is tight enough to test every single change.
+
+## Bound symbols in `throw` data maps
+
+> **Before writing any `throw` whose data map contains bound symbols, read [Built-in terms § Symbols in Literal Arguments](../reference/built-ins.md#symbols-in-literal-arguments).**
+
+Symbol bindings do not resolve inside literal map or list arguments passed directly to any term — including `throw`. Writing the map inline causes the symbol name (e.g., `"FilterPropCheck17490"`) to be serialized into the thrown value instead of the symbol's runtime value (e.g., `"decision"`).
+
+**Always bind the map to a variable first:**
+
+```oql
+;; WRONG — FilterPropCheck is serialized as the symbol name, not its value
+(throw "FILTER_SORT_COMBINED_UNSUPPORTED" {"filter-prop" FilterPropCheck})
+
+;; RIGHT — bind the map first, then throw the variable
+(= ErrData {"filter-prop" FilterPropCheck})
+(throw "FILTER_SORT_COMBINED_UNSUPPORTED" ErrData)
+```
+
+This applies to every term that accepts a map or list argument: `throw`, `run-page`, `set-data`, and all others. The rule and more examples are in [Built-in terms § Symbols in Literal Arguments](../reference/built-ins.md#symbols-in-literal-arguments).
