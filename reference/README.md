@@ -30,6 +30,8 @@ This bucket owns the public OQL language reference and public API surface. Inter
 
 - [Query execution](query-execution.md) -- The `with-skip`/`with-limit` constraint for CouchDB view pagination. Covers the critical limitation that skip/limit only work when the runtime resolves through a view index -- when it falls back to Mango scan, skip/limit are silently ignored and the query returns up to 1,000,000 rows. Keywords: with-skip, with-limit, pagination, view index, Mango scan, silent bug, page-query, CouchDB.
 
+- [Prefix-scan index selection](prefix-scan-index-selection.md) -- How `query-term-from-table` selects between defterm PK lookup, exact write-index bind, prefix-scan (single row), prefix-scan with k-way heap merge (N rows), Mango fallback, and no-matching-index error. Includes the operator push-down table showing which strategies honour `with-limit`, `with-skip`, and `with-sort`, the prefix-test algorithm, endkey sentinel formula, and heap-merge primitive descriptions. Keywords: index selection, prefix scan, write-index, defterm, PK lookup, Mango fallback, with-skip push-down, with-limit push-down, with-sort push-down, k-way merge, heap merge, lazy-range-fetch, startkey, endkey, no-matching-index, omega/query/no-matching-index, operator push-down, strategy selection.
+
 ### Workspace conventions
 
 - [Docs folder convention](docs-folder-convention.md) -- Where synced project doc trees live in an OmegaAI workspace and how they are named. All doc trees live under `Docs/` at the workspace root; each project gets a subfolder named with its display name (e.g. `Docs/MAB`, `Docs/Redefine Reach`). Keywords: Docs folder, workspace layout, synced docs, doc tree, pages directory, qo doc push, display name, subfolder naming.
