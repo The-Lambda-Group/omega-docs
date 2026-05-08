@@ -89,12 +89,33 @@ This commonly arises after `with-table-if` merges branches where different rows 
 
 ## with-order-by
 
-Sorts solutions before folding or returning:
+Sorts solutions before folding or returning. `with-order-by` **always sorts ascending** — there is no direction parameter.
 
 ```oql
 (with-order-by [Score]
   (fold [] Name append SortedNames))     ;; Names sorted by Score ascending
 ```
+
+### Producing a descending-sorted list
+
+Because `with-order-by` cannot sort descending directly, the pattern is:
+
+1. Sort ascending with `with-order-by [Key]`.
+2. Fold with **`prepend`** instead of `append` — prepend inserts each new value at the front of the accumulator, reversing the insertion order.
+
+```oql
+;; Ascending — lowest Score first
+(with-order-by [Score]
+  (fold [] Name append AscNames))
+
+;; Descending — highest Score first
+(with-order-by [Score]
+  (fold [] Name prepend DescNames))
+```
+
+`AscNames` and `DescNames` will be exact reverses of each other. This was verified empirically (Scenario 6, table-view-sort-filter-v3 session, 2026-05-09): `IdsDesc` was the exact reverse of `IdsAsc`.
+
+> **Reducer cannot be stored in a symbol.** You cannot write `(= Reducer "prepend") (fold [] Name Reducer DescNames)` and switch between `append`/`prepend` at runtime. Each direction requires a separate fully-explicit `fold` branch selected with `with-table-if`. See the [fold section](#fold) for the canonical branching pattern.
 
 ## with-group-by
 
