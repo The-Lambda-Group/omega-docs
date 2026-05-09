@@ -76,7 +76,7 @@ The protocol spec must be:
 
 If the spec is malformed (missing `functions` key, wrong shape, args is a list instead of an integer), the dispatcher cannot read the spec arity to compare against the caller's arity. Same outcome: zero solutions.
 
-For the structure of an impl `.oql` file (datastore declarations, clause definition, Clauses registration, file-level return), see [omega-ai-components/docs/how-to/write-implementation-impl-file](https://github.com/The-Lambda-Group/omega-ai-components/blob/master/docs/how-to/write-implementation-impl-file.md) once that gap is filled.
+For the structure of an impl `.oql` file (datastore declarations, clause definition, Clauses registration, file-level return), see [omega-ai-components/docs/how-to/write-implementation-impl-file](https://github.com/The-Lambda-Group/omega-ai-components/blob/master/docs/how-to/write-implementation-impl-file.md).
 
 #### 4. Impl actually stored
 

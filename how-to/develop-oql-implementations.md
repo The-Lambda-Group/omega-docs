@@ -15,6 +15,35 @@ Before writing any OQL implementation, read:
 
 Skipping these leads to violating the hard rules, using non-existent terms, misusing `if` (universal, not per-row), and missing idiomatic patterns like using `(get Map "key" Val)` as a condition in `with-table-if` (the `get` itself fails on null/missing, so the else branch provides the default).
 
+## Required file structure: `set-implementation-clauses`
+
+Every runnable OQL implementation file has a mandatory four-layer structure. **A bare OQL body (`(= Result "123") (return [Result])`) pushes successfully but fails at runtime** with `Qo.Data.Impl.Clauses/impl-clauses` no-return when called via `qo run`. The reason: `qo push` stores the OQL text, but `qo run` dispatches via the *compiled-clauses store* — a separate registry that a bare body never populates.
+
+The four layers:
+
+1. **Datastore declarations** — one `(datastore ...)` per namespace referenced anywhere in the file.
+2. **In-memory clause definitions** — one `(:- (Method Exec Result) ...)` per protocol method.
+3. **Clause registration** — build a Clauses map and call `set-implementation-clauses` to persist it.
+4. **File-level return** — `(return ["ok"])` as the last line, required for `qo push` to succeed.
+
+Minimum working example (Query protocol, one `run` method):
+
+```oql
+(datastore Qo.Public.OqlApi.Impl "omega/query-omega/public/oql-api/implementation")
+
+(:- (Run Exec Result)
+    (= Result "123"))
+
+(= Clauses {"run" {"2" Run}})
+(get $$ARG$$ "implementation-id" ImplId)
+(Qo.Public.OqlApi.Impl/set-implementation-clauses ImplId Clauses _)
+(return ["ok"])
+```
+
+The arity key `"2"` matches the 2-arg functor `(Run Exec Result)` — it must equal the protocol spec's `args` length as a JSON string.
+
+> **See [write-implementation-impl-file.md](../../omega-ai-components/docs/how-to/write-implementation-impl-file.md) for the full explanation** — arity key derivation, multi-method Clauses maps, push-time vs dispatch-time scoping, and all common mistakes.
+
 ## The workflow
 
 ### 1. Start with the plumbing
