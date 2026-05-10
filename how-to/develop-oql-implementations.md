@@ -125,3 +125,37 @@ Symbol bindings do not resolve inside literal map or list arguments passed direc
 ```
 
 This applies to every term that accepts a map or list argument: `throw`, `run-page`, `set-data`, and all others. The rule and more examples are in [Built-in terms § Symbols in Literal Arguments](../reference/built-ins.md#symbols-in-literal-arguments).
+
+## Variable names must not match datastore namespace final segments
+
+> **Convention: never use a single-word variable name that matches the final segment of any `(datastore ...)` declaration in the same clause.**
+
+The OQL gensym mechanism resolves variable names against the in-scope datastore bindings during recursive clause calls. If a variable name exactly matches the final segment of a datastore namespace path declared in the same clause, the engine can pre-bind the variable to the datastore reference object (a `clojure.lang.Symbol`) instead of leaving it free for the calling site to supply.
+
+**Example collision:**
+
+```oql
+(datastore Qo.Data.Dl.Func "omega/query-omega/data/dl/func")
+
+(:- (DeleteRow Exec Result)
+    ;; WRONG — "Func" matches the final segment of Qo.Data.Dl.Func.
+    ;; During recursive calls, Func is pre-bound to the datastore reference
+    ;; (a clojure.lang.Symbol) instead of the caller's intended value.
+    (= Func (get Exec "func-id"))
+    ...)
+```
+
+**Correct approach — use a name that does not appear as any declared datastore's final segment:**
+
+```oql
+(datastore Qo.Data.Dl.Func "omega/query-omega/data/dl/func")
+
+(:- (DeleteRow Exec Result)
+    ;; RIGHT — "DeleteFunc" does not collide with any declared datastore.
+    (= DeleteFunc (get Exec "func-id"))
+    ...)
+```
+
+**Symptoms of a collision:** the variable resolves to a `clojure.lang.Symbol` value (the datastore object) at the call site instead of the value the caller bound. The bug only surfaces during recursive clause calls, not when the clause body is evaluated in isolation, which makes it hard to diagnose without knowing the rule.
+
+**Scope of the rule:** check every `(datastore Ns.Path.Segment ...)` declaration in the same clause. The at-risk names are the final dot-separated segments — `Func` for `Qo.Data.Dl.Func`, `Page` for `Qo.Data.Page`, `Block` for `Qo.Data.Page.Block`, and so on. Rename any local variable that matches one of these to something descriptive and distinct (e.g., `DeleteFunc`, `TargetPage`, `ContentBlock`).
