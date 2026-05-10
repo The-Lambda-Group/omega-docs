@@ -230,6 +230,37 @@ A `with-table-if` can be used to **drop** rows from the downstream solution by h
 
 `(= true false)` unifies two values that cannot match, which fails the branch. In the `UNION` analogy, this is equivalent to `SELECT ... WHERE 1=0` for one of the two CTEs — the rows matching the condition simply don't appear in the output.
 
+### Throw in the else-branch does not halt the enclosing clause
+
+**A `throw` inside a `with-table-if` branch does NOT propagate out of the branch and stop the enclosing clause body.** The throw fires within the branch's own scope and terminates that solution path, but the OQL runtime continues executing subsequent terms in the enclosing clause with whatever bindings survived.
+
+The critical consequence: **any schema variable that was supposed to be bound by the then-branch remains unbound** — it exists in the outer clause as a raw `clojure.lang.Symbol` (an unresolved OQL symbol). Terms downstream that consume that variable will receive the symbol object itself, not a value, producing a runtime error or silent wrong behaviour.
+
+This is counterintuitive because it looks like error-guard control flow — "throw in the else-branch, so the rest of the clause only runs on the happy path." That mental model is wrong. The throw aborts the branch's solution, but the outer clause's remaining terms still execute.
+
+**Concrete failure that motivated this note:** a delete-page clause used `with-table-if` to look up a deletable functor and bind `Func`. The else-branch threw an error. The intent was that the `(call Func Deletable Result)` term after the `with-table-if` would only run when the lookup succeeded. In practice, `(call Func Deletable Result)` ran in all cases. When the else-branch fired, `Func` was still an unbound OQL symbol, and the `call` failed with a 500.
+
+**Fix: move any term that depends on schema variables inside the then-branch**, not after the `with-table-if`.
+
+```oql
+;; BAD — (call Func ...) runs even when Func was never bound.
+;; The else-branch throw does not prevent the outer-clause call.
+(with-table-if (lookup-deletable-functor DbId Name Func)
+  [DbId Name Func Deletable Result]
+  (= Deletable {"id" Name})
+  (throw "NOT_FOUND" {"name" Name}))
+(call Func Deletable Result)   ;; ← runs even when Func is unbound
+
+;; GOOD — move the call inside the then-branch.
+(with-table-if (lookup-deletable-functor DbId Name Func)
+  [DbId Name Func Deletable Result]
+  (and (= Deletable {"id" Name})
+       (call Func Deletable Result))
+  (throw "NOT_FOUND" {"name" Name}))
+```
+
+**Rule of thumb:** treat a `with-table-if` as a scope boundary for the variables it binds. Any term that needs a variable bound in the then-branch must live inside that then-branch. Do not assume the else-branch throw acts as a guard for subsequent outer-clause terms.
+
 ### When the condition is batch-wide, not per-row
 
 Several terms that look per-row actually evaluate **once against the whole parent solution**, returning true/false globally. If you gate a `with-table-if` on one of these, every row takes the same branch — which is almost never what you want for per-row dispatch.
