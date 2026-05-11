@@ -159,3 +159,63 @@ The OQL gensym mechanism resolves variable names against the in-scope datastore 
 **Symptoms of a collision:** the variable resolves to a `clojure.lang.Symbol` value (the datastore object) at the call site instead of the value the caller bound. The bug only surfaces during recursive clause calls, not when the clause body is evaluated in isolation, which makes it hard to diagnose without knowing the rule.
 
 **Scope of the rule:** check every `(datastore Ns.Path.Segment ...)` declaration in the same clause. The at-risk names are the final dot-separated segments — `Func` for `Qo.Data.Dl.Func`, `Page` for `Qo.Data.Page`, `Block` for `Qo.Data.Page.Block`, and so on. Rename any local variable that matches one of these to something descriptive and distinct (e.g., `DeleteFunc`, `TargetPage`, `ContentBlock`).
+
+## Paginated table-read pipelines: paginate first, look up second
+
+> **Anti-pattern: fold-full-table-into-map followed by slice.** If you read all N rows into a map and then apply `BatchTakeN` to narrow to a page of K keys, all N rows are loaded into memory regardless of K. At scale (N=1000, K=3) this is a full-table scan on every firing.
+
+The correct pattern: **apply pagination to the filtered set first, then do per-key lookup**.
+
+### Wrong: full-table-scan-into-map
+
+```oql
+;; ReadExperimentsMap — loads ALL N rows regardless of limit
+(:- (ReadExperimentsMap Exec ExperimentsMap)
+    (get Exec "experiments-folder-id" FolderId)
+    (prop-vals-by-folder FolderId _ Pv)
+    (get-in Pv ["prop-vals" "id"] ExpId)
+    (get-in Pv ["prop-vals" "status"] Status)
+    (fold {} [ExpId Status] assoc ExperimentsMap))
+
+(:- (OnEvent Exec Result)
+    (call ResolveLimit Exec LimitStr)
+    (call ReadExperimentsMap Exec ExperimentsMap)  ; N rows loaded
+    (keys ExperimentsMap AllKeys)
+    (call BatchTakeN AllKeys LimitStr PageKeys)    ; then narrow to K keys
+    ...)
+```
+
+This loads every row in the table on every Coordinator firing. At N=1000 with `limit=3`, the engine processes 1000 rows to return 3.
+
+### Right: paginate first, look up second
+
+```oql
+(:- (ReadExperimentIds Exec ExperimentIds)
+    (get Exec "experiments-folder-id" FolderId)
+    (prop-vals-by-folder FolderId _ Pv)
+    (get-in Pv ["prop-vals" "id"] ExpId)
+    (with-order-by [ExpId]          ; deterministic order for cursor stability
+      (fold [] ExpId append ExperimentIds)))
+
+(:- (LookUpExperiment FolderId ExpId Row)
+    (prop-vals-by-folder FolderId Pid Pv)
+    (get-in Pv ["prop-vals" "id"] ExpId)
+    (= Row Pv))
+
+(:- (OnEvent Exec Result)
+    (call ResolveLimit Exec LimitStr)
+    (call ReadExperimentIds Exec AllIds)
+    (call BatchTakeN AllIds LimitStr PageIds)      ; paginate the id list first
+    (run-term LookUpExperiment [FolderId PageId] PageId PageIds Row Rows)
+    ...)                                           ; then look up only the K rows
+```
+
+This reads only the PK column on every firing. The per-row lookup (`LookUpExperiment`) runs only K times.
+
+### When this matters
+
+The overhead difference is small at development scale (N=5-10 rows). It becomes significant once the table grows beyond a few hundred rows. Establishing the paginate-first shape from the start costs nothing and prevents a later rewrite.
+
+The pattern is the same one used by Execute and Sync Results (see [code-step-pagination-pattern.md](../explanation/code-step-pagination-pattern.md) for the full helper set: `ResolveSkip`, `ResolveLimit`, `BatchTakeN`, `ComputeHasMore`).
+
+> **Source:** I7 in session 2026-05-10-smartlead-schedule-error-propagation. The anti-pattern was identified as pre-existing tech debt in `ReadExperimentsMap`, which folds the entire Experiments table into a map before `BatchTakeN` narrows to `limit` keys — N rows loaded, K rows processed.
