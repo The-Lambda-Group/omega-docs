@@ -23,7 +23,48 @@ If you find another "obvious" name that doesn't exist, add it here rather than l
 (return [Result])                     ;; return from a query
 (uuid Id)                             ;; generate UUID
 (time-now Timestamp)                  ;; current ISO timestamp
+(throw "TAG" DataMap)                 ;; raise a typed OQL exception
 ```
+
+### `throw` — raising a typed exception
+
+**Signature:** `(throw Tag DataMap)` — exactly two arguments, both required.
+
+| Arg | Direction | Type | Description |
+|-----|-----------|------|-------------|
+| `Tag` | input | string literal | Identifies the error type. Must be a string literal (e.g. `"CAMPAIGN_NOT_FOUND"`), not a variable. |
+| `DataMap` | input | map | Carries error context. **Must be a pre-bound symbol** — never a map literal written inline at the call site. |
+
+**Why the map must be pre-bound:**
+
+```oql
+;; WRONG — throws at runtime with a cryptic error
+(throw "CAMPAIGN_NOT_FOUND" {"campaign-id" CampaignId "status" Status})
+
+;; RIGHT — bind the map first, then pass the symbol
+(= ErrData {"campaign-id" CampaignId "status" Status})
+(throw "CAMPAIGN_NOT_FOUND" ErrData)
+```
+
+The inline map literal `{"campaign-id" CampaignId ...}` is evaluated at parse time, before the runtime has bound `CampaignId` or `Status`. The engine reads the map contents as literal text, so `CampaignId` and `Status` remain as symbolic names, not their runtime values. At runtime, `throw` receives a map of unresolved symbol names rather than data — producing a cryptic failure instead of a useful error. This is not specific to `throw`; it is the general "symbols in literal arguments" rule — see [§Symbols in Literal Arguments](#symbols-in-literal-arguments) for the full explanation and additional examples.
+
+**Usage in error-handling branches:**
+
+```oql
+;; Check result and throw if unsuccessful
+(get Res "status" Status)
+(when-not (= Status 200)
+  (= ErrData {"status" Status "body" Body "campaign-id" CampaignId})
+  (throw "HTTP_ERROR" ErrData))
+
+;; Throw in an else branch of with-table-if
+(with-table-if (some-condition-here)
+  (do-work ...)
+  (= ErrData {"context" ContextVal "reason" "condition-not-met"})
+  (throw "PRECONDITION_FAILED" ErrData))
+```
+
+**Note:** `throw` inside an else branch of `with-table-if` does NOT halt the enclosing clause on its own. Variables that remain unbound in the else branch will be unbound `clojure.lang.Symbol` objects if the then-branch is taken. For the full branch-scope rules, see [control-flow.md §throw-in-else-branch](control-flow.md).
 
 ## Arithmetic
 
