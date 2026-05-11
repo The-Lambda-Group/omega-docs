@@ -423,11 +423,46 @@ Use this pattern when a term or return envelope needs a list of maps and the lis
 
 **Response map keys:**
 
-| Key | Description |
-|-----|-------------|
-| `status` | HTTP status code (number) |
-| `body` | Response body (string) |
-| `headers` | Response headers (map) |
+| Key | Type | Description |
+|-----|------|-------------|
+| `status` | integer | HTTP status code (e.g. `200`, `400`, `500`). |
+| `body` | string | Response body as a raw JSON-encoded string. **Not a parsed map.** Callers must parse it separately with `json-stringify` in parse-direction before accessing fields. |
+| `headers` | map | Response headers as a string-to-string map. |
+
+**Parsing the response body:**
+
+The `body` field is always a raw JSON string, never a parsed map. Access fields in the response body with `json-stringify` in parse-direction:
+
+```oql
+(http-request Req Res)
+(get Res "status" Status)
+(get Res "body" RawBody)
+(json-stringify ParsedBody RawBody)   ;; parse direction: bind second arg, leave first free
+(get ParsedBody "id" CampaignId)
+```
+
+Do NOT call `(get Res "body" Body)` and then immediately `(get Body "id" ...)` — `Body` is a string, not a map. The `(get ...)` on a string field will fail silently or produce unexpected results.
+
+**Full error-handling pattern:**
+
+```oql
+(= Req {"method" "post"
+         "url" Url
+         "headers" Headers
+         "body" JsonBody})
+(http-request Req Res)
+(get Res "status" Status)
+(when-not (= Status 200)
+  (get Res "body" ErrBody)
+  (= ErrData {"status" Status "body" ErrBody "url" Url})
+  (throw "HTTP_ERROR" ErrData))
+;; only parse body after confirming success
+(get Res "body" RawBody)
+(json-stringify ParsedBody RawBody)
+(get ParsedBody "id" ResultId)
+```
+
+Always branch on `status` BEFORE parsing `body`. On non-2xx responses the body may contain an error message string rather than the expected JSON shape, and attempting to `get-in` into a parsed error-body map will silently fail or bind unexpected values.
 
 ### Deprecated method-specific terms
 

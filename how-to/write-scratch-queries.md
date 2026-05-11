@@ -61,3 +61,30 @@ To find the URI for a datastore, look for its `(datastore ...)` declaration in t
 ### Why this differs from stored clauses
 
 Inside a stored clause body, you must also re-declare any datastore the clause references (the top-level `(datastore ...)` is stripped from the stored body during serialization). The same scoping rule applies in both cases — each execution context is isolated — but the symptom path is different: deployed clauses fail silently or produce no-return; scratch files fail immediately with the `clojure.lang.Symbol` protocol error.
+
+---
+
+## When to use a scratch OQL file vs `qo run` in a shell loop
+
+Before writing a scratch file, ask: can the CLI express the full operation in one `qo run` call, repeated for each item in a list?
+
+**Use a shell loop with `qo run`** when the operation is "call this adapter method for each item in a list." A shell loop is simpler, more debuggable, requires no scratch file lifecycle management, and does not leave a file behind that future agents may mistake for a permanent artifact.
+
+```bash
+# Correct: re-activate three campaigns with a shell loop
+for id in campaign-1 campaign-2 campaign-3; do
+  qo run create-experiment -p Installable -m run -a "[{\"campaign-id\": \"$id\"}]"
+done
+```
+
+**Use a scratch OQL file** only when the CLI cannot express the operation in one command — for example, when you need multi-step logic, joins across tables, or conditional branching that depends on query results. These are computations that require OQL's term language to express at all.
+
+| Situation | Tool |
+|---|---|
+| Call an adapter method for each item in a known list | Shell loop with `qo run` |
+| Inspect or join data across two tables | Scratch OQL |
+| Multi-step computation (query → transform → conditional write) | Scratch OQL |
+| Batch-create rows with per-row derived values | Scratch OQL |
+| Run the same single-method adapter call N times | Shell loop with `qo run` |
+
+**Source:** I8 in session 2026-05-10-smartlead-schedule-error-propagation — Task 6c was initially written as a scratch file to re-activate campaigns; the user pointed out it was just `qo run create-experiment` in a loop.
