@@ -332,6 +332,45 @@ The capture mechanism interacts with several scoping and invocation rules docume
 - [add-or-get-by-name binds the same block across multiple solution rows](../gotchas/add-or-get-by-name-multi-row.md) — when the fix is "wrap in a stored helper invoked via `run-term`," capture is how you hand the helper the bindings it needs from the surrounding scope.
 - [run-term does not work on in-memory clauses](../gotchas/run-term-in-memory-clause.md) — capture targets must be stored functors when reached via `run-term`. Define the stored clause at the top level, build a functor, and capture the functor. **Default rule for in-memory captured helpers: use `call`. `run-term` against a captured in-memory helper is appropriate ONLY when replacing `with-group-by` (partition-before-fold scaling); in any other context it produces a 500 or engine spin-out / `ECONNRESET`.**
 
+## fold in clause bodies
+
+`fold` is a solution-wide reducer. When you write `(fold [] Sym append List)` inside a clause body, two edge-case behaviors can surprise you:
+
+### fold with zero input solutions produces zero output solutions
+
+`fold` does **not** bind its accumulator to the `Init` value when the upstream has zero solutions. If the upstream term produces zero rows, `fold` produces zero rows — the `Agg` symbol is left unbound, and anything downstream that touches it fails with `omega/query/no-return`.
+
+```oql
+;; If (SomeScan ...) matches nothing, Items is UNBOUND, not [].
+(SomeScan Arg Item)
+(fold [] Item append Items)
+(return [Items])  ;; omega/query/no-return here — Items was never bound
+```
+
+This is the most common cause of a no-return error in a clause that looks correct on the happy path. See [Reducers → fold over zero solutions](reducers.md#fold-over-zero-solutions-does-not-bind-its-accumulator) for the full explanation.
+
+### The count-then-fold workaround pattern
+
+The canonical workaround is to gate the fold with a `with-table-if` whose condition is the upstream predicate. The else-branch binds the accumulator explicitly for the zero-row case:
+
+```oql
+;; count-then-fold idiom: safe regardless of upstream cardinality
+(with-table-if (<upstream scan producing PerRowSym>)
+  [<header including List>]
+  (fold [] PerRowSym append List)
+  (= List []))
+;; List is bound on both paths — fold path and empty path.
+(length List Count)  ;; outside the with-table-if; works on both paths
+```
+
+**Why this works:** the `with-table-if` condition gates execution. If zero rows match, the else-branch fires and binds `List = []`. If N rows match, the then-branch fires and `fold` reduces them into `List`. Either way, `List` is bound before `length` runs.
+
+**The load-bearing constraint:** the `fold` symbol must be **per-row-unique** — one distinct value per upstream row. Since `fold` deduplicates over its input symbol (see [Reducers → fold folds over unique values, not rows](reducers.md#fold-folds-over-unique-values-not-rows)), only a per-row-unique symbol gives you one list entry per row. For `prop-vals-by-folder` scans, the page-id (`Pid`) is reliable because each CouchDB document has a unique `_id`.
+
+**Note:** `(length List Count)` must be placed **outside** the `with-table-if`, not inside either branch. Inside the then-branch, `List` is still being accumulated; only the output binding (after the `with-table-if` merges) has the final value.
+
+For the `with-count` + `with-table-if` alternative (when `with-count` is available and your predicate is simple), and for the full list of `with-count` NPE patterns that motivate this workaround, see [Reducers → fold pitfalls](reducers.md#fold-pitfalls).
+
 ## Implementation clause arity
 
 OQL always dispatches implementation (protocol method) clauses with exactly **2 positional args**: `Exec` and `Result`. The clause signature is always:
