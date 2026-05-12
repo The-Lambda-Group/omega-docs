@@ -1,0 +1,98 @@
+<h1>Develop OQL</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>This is the manual for working in OQL. Read it before touching a <code>.oql</code> file. It covers the mindset both authoring and debugging depend on, the inspection mechanic the language gives you in place of print statements, and the loop you operate forward (when adding) or backward (when debugging). Authoring and triage are the same loop in two directions; they share this doc.</p>
+
+<p><strong>Every plan that touches OQL implementation work MUST list this doc as the single most important doc</strong> and require the implementer to read it before any code change. This rule exists because every prior multi-session OQL build that produced a discipline failure shared one root cause — the implementer hadn't internalized this doc.</p>
+
+<h2>Operating manual (re-read every session)</h2>
+
+<p>These rules are what to actually do, in order. The rest of the doc is rationale. If you're an agent and you only have time for one thing, read this section.</p>
+
+<ol>
+  <li><strong>Each run answers exactly one question.</strong> Before changing the file, name the question out loud: "what's bound to X right now?", "does this fold collapse?", "what shape does write-table reject?" If you can't name the question, you're in build-mode. Stop and name it.</li>
+  <li><strong>Inspect by mutating <code>Result</code>.</strong> Comment out everything after the term you want to look at. Bind <code>Result</code> to the variable, list, or map you want to surface. Run. Read the output. There are no print statements in OQL — <code>Result</code> IS the inspection channel.</li>
+  <li><strong>When a term fails, comment it out and bind <code>Result</code> to its inputs.</strong> The failing term told you that it failed. Its inputs tell you what data it failed on. Don't theorize; look at the inputs. The bug is almost always visible there.</li>
+  <li><strong>When wall-clock grows past 1–2 seconds for a small workload, you have a cardinality leak.</strong> Don't add features — find the leak. Common shapes: an unfolded <code>(get list _ var)</code> interacting with another <code>(get otherlist _ othervar)</code> (cross-product), a captured-helper invocation that opens N solutions when you thought it returned one, a <code>with-group-by</code> over many distinct keys.</li>
+  <li><strong>If you catch yourself writing "I think the issue is…" or "this is probably because…", stop.</strong> That's the theorize-mode signal. Close the file, redirect <code>Result</code> to the relevant intermediate, run. The state will tell you. Theories are post-hoc and disposable; observations decide the next probe.</li>
+</ol>
+
+<h2>The push-run loop</h2>
+
+<p>OQL development is REPL-driven. You build queries incrementally, one step at a time, verifying each step before adding the next. The push-run cycle is fast enough to test every single change — there is no reason to batch work.</p>
+
+<p>Before writing any OQL implementation, read:</p>
+<ul>
+  <li>OQL hard rules — non-negotiable rules on forbidden datastores and the boolean-string requirement.</li>
+  <li>Execution model — how OQL evaluates queries (solution sets, why terms can't be nested inside literals).</li>
+  <li>Built-in terms — the full built-in term reference.</li>
+  <li>Control flow — read this before writing any <code>when</code>, <code>when-not</code>, <code>if</code>, or <code>with-table-if</code>.</li>
+</ul>
+
+<h2>Debug by returning early</h2>
+
+<p>When a query fails partway through — wrong HTTP status, missing row, mysterious unbound symbol — the fastest path to the root cause is to <strong>comment out everything after the suspected failure point and return a snapshot of the intermediate state</strong>. Re-run the query, inspect the snapshot, then un-comment one more clause and repeat.</p>
+
+<p>The recipe:</p>
+<ol>
+  <li>Find the clause you suspect is broken.</li>
+  <li>Comment out every clause after it (including the original <code>Result</code> binding).</li>
+  <li>Bind <code>Result</code> to a <strong>tuple of the variables you want to inspect</strong>: <code>(= Result [Var1 Var2 Var3])</code></li>
+  <li>Run. Observe. Move the return point forward one step. Repeat.</li>
+</ol>
+
+<p>This is not just for debugging. It's also the authoring loop — build one step, verify, build the next. The loop is the same in both directions.</p>
+
+<h2>The Result-as-inspection-channel rule</h2>
+
+<p>OQL has no print statements and no debug logging from the query layer. The only way to see what a term is binding is to make <code>Result</code> be the thing you want to see. This means:</p>
+
+<ul>
+  <li>During development, <code>Result</code> is a diagnostic variable as much as it is the final output.</li>
+  <li>The final <code>(return [Result])</code> is the only output channel. Use it for inspection at every intermediate step.</li>
+  <li>Binding <code>Result</code> to <code>[X Y Z]</code> returns the tuple — you can inspect multiple values at once.</li>
+</ul>
+
+<h2>One change at a time</h2>
+
+<p>When debugging, make exactly one change per push-run cycle. If you make multiple changes and the bug is fixed, you don't know which change fixed it. If you make multiple changes and the bug persists, you've mixed signals. The discipline: one question per run, one change per push, one observation per cycle.</p>
+
+<p>The same discipline in build mode: add one term or clause at a time, verify it produces the expected bindings, then add the next. Don't write 15 terms and push — that's build-mode. Push at each term.</p>
+
+<h2>Cardinality as a diagnostic signal</h2>
+
+<p>If your query runs for more than 1–2 seconds on a small workload, you have a cardinality explosion. The most common shapes:</p>
+
+<ul>
+  <li><strong>Cross-product</strong>: two <code>(get list _ var)</code> terms in the same clause body without a fold between them. Each produces N solutions; the cross-product is N×M.</li>
+  <li><strong>Captured helper opens multiple solutions</strong>: a helper invoked via <code>call</code> produces more than one solution row per input. The caller's solution table multiplies by the helper's cardinality per call.</li>
+  <li><strong><code>with-group-by</code> over many distinct keys</strong>: each key triggers a separate accumulation pass. Switch to <code>run-term</code> per key for the partition-before-fold pattern.</li>
+  <li><strong>with-table-if condition is a multi-row scan</strong>: the then-branch runs once per condition row, not once total. See the existence-check fallacy in Control Flow.</li>
+</ul>
+
+<p>Diagnose cardinality by returning early and counting rows: <code>(= Result [X (length Y Len) Len])</code> where Y is the suspected cross-product.</p>
+
+<h2>Verb shift for agents</h2>
+
+<p>Two mindsets that are incompatible with good OQL work:</p>
+
+<ul>
+  <li><strong>Build-mode</strong>: writing many terms in a batch, pushing once, reading the error, theorizing a fix, writing more terms. Build-mode is slow, error-prone, and produces code that is hard to debug. The antidote is the one-question-per-run rule.</li>
+  <li><strong>Mirror mode</strong>: agreeing with whatever the last output said and restating it as the next move. Mirror mode produces a chain of confirmed mistakes. The antidote is to redirect <code>Result</code> to the inputs of the failing term before any theory.</li>
+</ul>
+
+<p>The verb for OQL work is <strong>probe</strong>, not build. You probe the current state. You observe what comes back. You make the minimal change that answers the next question. You probe again.</p>
+
+<h2>Floundering signals</h2>
+
+<p>If you observe any of these, stop immediately and surface to the user:</p>
+
+<ul>
+  <li>The same error appearing after the same fix has been applied twice.</li>
+  <li>Three different errors in one session with no consistent trend.</li>
+  <li>A wall-clock longer than 30 seconds on any operation that should complete in seconds.</li>
+  <li>A socket hang-up or <code>ECONNRESET</code> — the engine may be stalled and require a pod restart.</li>
+  <li>A "not sure what to try next" state without a concrete next probe defined.</li>
+</ul>

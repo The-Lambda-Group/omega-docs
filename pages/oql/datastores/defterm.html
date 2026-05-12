@@ -1,0 +1,106 @@
+<h1>defterm Semantics</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p><code>defterm</code> declares a term schema with a primary key on a datastore. It is a relatively new construct in OQL — it was never a hard requirement, and many existing terms in the system have <strong>no defterm</strong>, which is the normal default state.</p>
+
+<p><strong>Read this before you "add a defterm to fix a full-scan throw."</strong> Adding a defterm to a term that already has rows is a <strong>destructive rekey</strong>, not an additive index.</p>
+
+<h2>Syntax recap</h2>
+
+<pre><code>(datastore Qo.Data.LogStream "omega/query-omega/data/log-stream")
+
+(defterm Qo.Data.LogStream
+  {"name" "log-stream-data"
+   "args" ["AppId" "LogStreamId" "LogStream"]
+   "primary-key" ["LogStreamId"]})</code></pre>
+
+<p>Names the term, lists positional args, declares which arg(s) are the primary key.</p>
+
+<h2>What a defterm controls: row-id derivation</h2>
+
+<p>The single most important fact about <code>defterm</code> is that it changes <strong>how each row's <code>_id</code> is generated when the term is written</strong>.</p>
+
+<h3>Without a defterm (the default)</h3>
+
+<p>A term without a defterm is written through the legacy bulk-insert path. The row goes to CouchDB's <code>_bulk_docs</code> endpoint with no <code>_id</code> field, and <strong>CouchDB assigns the row id</strong>. The row id is opaque — the engine reads the row back through Mango selectors or view indexes, never by id.</p>
+
+<h3>With a defterm</h3>
+
+<p>A term with a defterm is written through the termdef path. The row id is derived from the primary-key value:</p>
+
+<pre><code>_id = "id_" + sha256(json.write_str(pkey-args))</code></pre>
+
+<p>The same pkey value always produces the same <code>_id</code>. This is why defterm-backed writes are upserts, why <code>fetch-revs</code> is needed before a bulk write (to find the existing rev), and why deleted defterm rows can be cleanly resurrected with a new write.</p>
+
+<h2>Why this matters at the language level</h2>
+
+<p>Three downstream consequences follow from the row-id rule:</p>
+<ol>
+  <li><strong>Defterm pkeys behave like SQL primary keys.</strong> Two writes with the same pkey value collide on the same row id; the second supersedes the first. Without a defterm, repeated writes append new rows.</li>
+  <li><strong>Defterm-backed terms can be looked up by exact pkey at view-index speed.</strong> The pkey is the row id, so lookups by full pkey are O(1) hash-style fetches.</li>
+  <li><strong>Stack traces show positional pkey matches against the defterm.</strong> When triaging an <code>omega/query/full-scan</code> throw, the engine checks bound-arg positions against the defterm's pkey arg positions.</li>
+</ol>
+
+<h2>When to add a defterm</h2>
+
+<p>Add a defterm <strong>at the time you create a new term</strong> if:</p>
+<ul>
+  <li>You want pkey-based upsert semantics (writing the same pkey overwrites instead of appending).</li>
+  <li>You want the by-pkey lookup to be a cheap deterministic fetch.</li>
+  <li>The pkey is well-defined and stable across the term's lifetime.</li>
+</ul>
+
+<p>If you are not sure, leave the defterm off. <strong>A term without a defterm is fully functional</strong> — the absence is normal, not a defect. You can always add <code>(write-index …)</code> declarations later for off-pkey lookups; that path does not rekey existing data.</p>
+
+<h2>When NOT to add a defterm</h2>
+
+<ul>
+  <li>Do <strong>not</strong> add a defterm to a term that <strong>already has data</strong> as a way of "fixing" a query problem.</li>
+  <li>Do <strong>not</strong> read the absence of a defterm as evidence of an orphan, a missing source artifact, or a bug.</li>
+  <li>Do <strong>not</strong> add a defterm "just to make it more complete." Defterms exist to enforce a uniqueness/upsert contract. If the term has no real uniqueness contract, declaring one introduces new failure modes without a corresponding gain.</li>
+</ul>
+
+<h2>Adding a defterm to a term with data — this is destructive</h2>
+
+<p>If a term has been in production with no defterm and accumulated rows, those rows have CouchDB-assigned (random-UUID) row ids. The engine has been reading them through Mango selectors, view indexes, or the legacy term-query path.</p>
+
+<p>If you then add a defterm and deploy:</p>
+<ol>
+  <li>The deploy registers the new defterm.</li>
+  <li>Subsequent writes go through the termdef path: row id = <code>id_&lt;sha256(pkey)&gt;</code>.</li>
+  <li>Subsequent <strong>reads</strong> by pkey compute the deterministic id and try to fetch it directly.</li>
+</ol>
+
+<p>The pre-existing rows still have their old random-UUID ids. The deterministic id the engine computes from the pkey <strong>does not match any existing row</strong>. From the perspective of a pkey lookup, the existing data is <strong>unreachable</strong> — even though the rows are still physically present in CouchDB. From the application layer, this is indistinguishable from data loss.</p>
+
+<p>This is <strong>NOT</strong> something <code>(refresh)</code> fixes. It is NOT something a redeploy fixes. It is NOT something the engine reconciles in the background. It is a content-addressing change with no automatic migration.</p>
+
+<h3>What an actual defterm migration would require</h3>
+
+<ol>
+  <li>Read every existing row of the term into memory (or stream it).</li>
+  <li>Compute the new deterministic id for each row from the pkey.</li>
+  <li>Write each row at the new id (the termdef-path write does this if you re-insert through the term).</li>
+  <li>Delete the old row at the old id.</li>
+</ol>
+
+<p>This is a separate data-migration project, not a side effect of declaring the defterm. If you find yourself reaching for "let me just add a defterm to this term," and the term already has production data, <strong>stop and ask the user.</strong></p>
+
+<h2>Removing a defterm from a term with data</h2>
+
+<p>The mirror case. Removing a defterm from a term that has been written with deterministic ids causes subsequent writes to go back through the legacy path with random ids. The existing deterministic-id rows become orphans relative to the new write path. The same migration discipline applies.</p>
+
+<h2>Practical implication: full-scan triage</h2>
+
+<p>When a query throws <code>omega/query/full-scan</code> and the offending term has no defterm, an inexperienced agent might conclude "the term has no pkey index, so I should add a defterm." <strong>This is the wrong move on a term with data.</strong></p>
+
+<p>The valid fixes for a full-scan throw on a no-defterm term, in priority order:</p>
+<ol>
+  <li><strong>Caller-restructure</strong> — the default. Drop over-bound args from the call; bind only what an existing index covers.</li>
+  <li><strong>Add a <code>(functor …)</code> + <code>(write-index …)</code></strong> on the existing datastore. This adds a secondary index without rekeying any existing rows.</li>
+  <li><strong>Bookend with <code>(enable-full-scan)</code> / <code>(disable-full-scan)</code></strong> at the narrowest scope, with explicit user authorization, as an interim.</li>
+</ol>
+
+<p><strong>Adding a defterm is not on this list.</strong> If a defterm is genuinely the right contract for the term going forward, it is a separate project that includes the data-migration step — not a one-line declaration deploy.</p>

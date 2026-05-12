@@ -1,0 +1,118 @@
+<h1>Debug &amp; Triage</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>This is the triage mirror of develop-oql. Authoring runs the push-run loop <strong>forward</strong> — add one step, verify, add the next. Triage runs the same loop <strong>backward</strong> — strip one step, verify, strip again. Both depend on the same tight feedback cycle. If you are debugging an OQL failure, you are the authoring loop in reverse — read the develop-oql guide first if you haven't, then come back.</p>
+
+<p>Every rule below produces an <strong>artifact</strong>. A minimum-repro command, a ruled-in/out list, a written Observed/Hypothesis/Test trio. If you finish triage without writing anything concrete down, you ran on vibes and you are going to ship a non-fix.</p>
+
+<h2>The six triage rules</h2>
+
+<h3>1. Minimum reproduction is the first move, always</h3>
+
+<p>Before any theory of cause, strip the failing invocation to the smallest thing that still reproduces. If what you are running is larger than what reproduces, you have not narrowed.</p>
+
+<p><strong>Artifact:</strong> a one-screen scratch file or <code>qo run</code> command that reproduces the failure. Pin its exact output at the top of your working notes.</p>
+
+<h3>2. Shrink the frame before changing any code</h3>
+
+<p>Comment out terms from the bottom of the clause body up, moving the <code>(return [Result])</code> earlier at each step. At each position, ask: does the failure persist? When the failure disappears, the removed term (or its interaction with something above) is the cause.</p>
+
+<h3>3. Redirect Result to the failing term's inputs</h3>
+
+<p>The failing term tells you that it failed. Its inputs tell you what data it failed on. Before any theory, bind <code>Result</code> to the inputs of the failing term and run. The bug is almost always visible in the data.</p>
+
+<pre><code>;; Before: the failing term
+(some-failing-term Arg1 Arg2 Output)
+(return [Output])
+
+;; After: inspect the inputs
+(= Result [Arg1 Arg2])
+(return [Result])</code></pre>
+
+<h3>4. Keep a ruled-in / ruled-out list</h3>
+
+<p>For each probe, record: what you ran, what came back, and what it rules in or out. This is not optional — without the list, you loop. With it, you build toward the root cause.</p>
+
+<h3>5. Never pattern-match a prior fix</h3>
+
+<p>If this error looks like an error you've seen before, resist the temptation to apply the same fix. Confirm the specific failure mode first. Pattern-matching prior fixes without confirmation is how wrong fixes get shipped.</p>
+
+<h3>6. Stop and surface when you're stuck</h3>
+
+<p>If you have applied a fix and the error persists, or if you have applied two different fixes and neither worked, stop. Describe the failure in terms of what you observed (not what you theorized) and surface to the user. Do not retry a third fix without input.</p>
+
+<h2>Triaging omega/query/full-scan</h2>
+
+<p>When a query throws <code>omega/query/full-scan</code>:</p>
+
+<ol>
+  <li><strong>First move: caller-restructure.</strong> Drop over-bound args from the call; bind only what an existing index covers. This is the fix in the majority of cases. An over-bound call is one that binds more args than any declared index covers, forcing a Mango fallback and triggering the throw.</li>
+  <li><strong>Check the bound-arg set against the defterm pkey and write-indexes.</strong> The error message includes <code>:bound-positions</code> (which args are bound) and <code>:candidate-indexes</code> (which indexes were considered). Compare directly.</li>
+  <li><strong>If no index serves the query and caller-restructure is not possible:</strong> add a <code>(functor …)</code> + <code>(write-index …)</code> on the existing datastore. This adds a secondary index without rekeying any existing rows. Requires user permission.</li>
+  <li><strong>As a last resort:</strong> bookend with <code>(enable-full-scan)</code> / <code>(disable-full-scan)</code> at the narrowest scope, with explicit user authorization, as an interim while the proper fix is scheduled.</li>
+  <li><strong>Never add a defterm to fix a full-scan on a term with existing data.</strong> This is a destructive rekey — see the defterm doc.</li>
+</ol>
+
+<p>If the offending term is a singleton-row read (arity-1, output-only arg), see the Singleton-Row Lookup doc — caller-restructure does not apply there because there are no input args to restructure.</p>
+
+<h2>Triaging omega/query/no-return</h2>
+
+<p><code>omega/query/no-return</code> is a single error name that covers three structurally different failure modes:</p>
+
+<table>
+  <tr><th>Mode</th><th>Trigger</th><th>First check</th></tr>
+  <tr><td><strong>Scratch-file no-return</strong></td><td>A scratch query binds <code>Result</code> but never calls <code>(return [Result])</code></td><td>Add <code>(return [...])</code> — see Scratch Queries guide</td></tr>
+  <tr><td><strong>Dispatch-layer no-return</strong></td><td>The dispatcher could not select a clause to run</td><td>Check arity (must be 2: Exec, Result), check Clauses map, check protocol spec</td></tr>
+  <tr><td><strong>Body-level zero-solutions</strong></td><td>The clause body ran but a term produced zero solutions</td><td>Bisect the body — return early at each term to find where the solution table empties</td></tr>
+</table>
+
+<h3>Dispatch-layer diagnosis</h3>
+
+<p>If the no-return fires before the clause body runs, the dispatcher failed to select a clause. Check:</p>
+<ul>
+  <li><strong>Arity</strong> — the implementation clause signature must be exactly <code>(:- (MyClause Exec Result) ...)</code>. A 3-arg signature never unifies.</li>
+  <li><strong>Clauses map</strong> — the <code>set-implementation-clauses</code> call must map the protocol method name (e.g., <code>"run"</code>, <code>"on-event"</code>, <code>"install"</code>) to the correct clause symbol.</li>
+  <li><strong>Protocol spec</strong> — the protocol ID and method name must match exactly.</li>
+</ul>
+
+<h3>Body-level diagnosis</h3>
+
+<p>Bisect the body by returning early at each term. When you find the term where the solution table empties:</p>
+
+<ul>
+  <li><strong>Unbound fold accumulator</strong>: the most common cause. A <code>fold</code> over zero upstream solutions leaves the accumulator unbound. Use the canonical fold-with-default idiom (see Reducers).</li>
+  <li><strong>Missing field in a get/get-in</strong>: the term fails per-row for rows where the field doesn't exist. Check the key name and the data shape.</li>
+  <li><strong>Index miss</strong>: a datastore lookup found no matching rows. Check the bound args against the index.</li>
+  <li><strong>LLM response truncation</strong>: a <code>call-llm</code> invocation fails with <code>omega/jvm/EOFException: JSON error (end-of-file inside string)</code>. The LLM emitted a response that was cut off mid-string before the closing braces and quotes that would make the payload valid JSON. This looks like a JSON parse bug but is not. Fix the producer — tighten the LLM prompt so it emits complete JSON responses within token limits.</li>
+</ul>
+
+<h2>Check data table integrity</h2>
+
+<p>Use this when a table-backed lookup fails, a row reads as empty, or a helper probe produces surprising row-page results. Before diagnosing helper logic, prove whether the property table's storage contract is intact.</p>
+
+<p>The common invariant is:</p>
+<pre><code>logical row key -&gt; row-index entry -&gt; row page -&gt; required row content</code></pre>
+
+<p>If any link is missing, helper probes that depend on the same table are not clean evidence about the helper.</p>
+
+<p>When to run this check:</p>
+<ul>
+  <li>A helper that has worked before suddenly returns no rows.</li>
+  <li>A write confirmed success but a subsequent read finds nothing.</li>
+  <li>A row-index or sec-index lookup returns unexpected results.</li>
+  <li>Any time you are about to blame the helper logic but haven't yet verified the table has the row you expect.</li>
+</ul>
+
+<p>The check:</p>
+<ol>
+  <li>Probe the row-index directly: <code>(Qo.Public.OqlApi.Db.Prop/row-index FolderId RowKey PageId)</code>. Does it return the expected PageId?</li>
+  <li>Probe the page directly: <code>(Qo.Public.OqlApi.Page/page-by-id PageId Page)</code>. Does the page exist?</li>
+  <li>Probe the row content: <code>(Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder FolderId PageId PropVals)</code>. Does the page have the expected property values?</li>
+  <li>If any link is missing, the data integrity is broken — not the helper logic.</li>
+</ol>
+
+<h2>println-stream corrupts solution context</h2>
+
+<p><code>println-stream</code> has a side effect: it modifies the solution context. If you call <code>println-stream</code> before binding your <code>Result</code> symbol, the solution context may be corrupted and <code>Result</code> becomes unresolvable. Always bind <code>Result</code> first, then log. Prefer the <code>print-stream</code> query (Omega Queries component) over raw <code>println-stream</code>.</p>

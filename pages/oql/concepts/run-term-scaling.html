@@ -1,0 +1,88 @@
+<h1>run-term Scaling</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>The rule</h2>
+
+<p><strong>For in-memory captured-helper invocations: use <code>call</code> by default. <code>run-term</code> is appropriate ONLY in two specific contexts:</strong></p>
+
+<ol>
+  <li><strong>Partition-before-fold</strong> — replacing <code>with-group-by</code> with per-partition <code>run-term</code> invocations.</li>
+  <li><strong>Per-row iteration at scale</strong> — a helper invoked once per row in a multi-row solution table where K ≥ ~30 rows.</li>
+</ol>
+
+<p>In every other context — one-solution-in / one-solution-out helpers, list-mapping helpers, validation helpers, transformation helpers — <code>(run-term ...)</code> against an in-memory captured helper is wrong. The hard failure mode is a 500. The softer, more dangerous failure mode is engine spin-out / <code>ECONNRESET</code> — a malformed <code>run-term</code> invocation can stall the database and require a pod restart.</p>
+
+<p>If you are not replacing a <code>with-group-by</code> and not in a per-row iteration at scale, you are not in the exception. Use <code>call</code>.</p>
+
+<h2>Why agents get this wrong</h2>
+
+<p>The documentation for <code>run-term</code> covers both the partition-before-fold case and the per-row-iteration case. Agents reading the performance section of the reducers doc often conclude "use <code>run-term</code> for performance" and apply it to all captured-helper calls. This is wrong. <code>run-term</code> is not a general performance optimization — it is the correct tool for exactly two shapes, and it actively breaks other shapes.</p>
+
+<h2>Why run-term works in the two valid shapes</h2>
+
+<p><code>run-term</code> runs its target as a separate execution against a fresh solution. This is mechanically what makes the partition-before-fold pattern fast (each invocation sees only one partition's rows) and what makes the per-row iteration pattern work at scale (each invocation sees only one row's bindings, preventing the K-row solution-table residue that causes <code>call</code> to hang).</p>
+
+<p>Outside these two shapes, the "fresh solution per invocation" mechanism is not needed and produces the wrong result or fails outright.</p>
+
+<h2>Partition-before-fold scaling</h2>
+
+<p><code>fold</code> / <code>with-group-by</code> / <code>with-order-by</code> scale poorly when the solution table contains many distinct group-key values. Per-partition bookkeeping compounds non-linearly with partition count.</p>
+
+<p>The idiomatic workaround: wrap the reducer body in a clause and invoke it once per key via <code>run-term</code>. Each invocation's solution is single-partition, so the reducer chain runs against only that partition's rows.</p>
+
+<p><strong>Measured 2026-04-24:</strong> 8.3s with a top-level <code>with-group-by [PageId]</code>, 0.5s when the same reducer body was called via <code>run-term</code> per page (21-page pull).</p>
+
+<h2>Per-row iteration at scale</h2>
+
+<p>A per-row iteration is any pattern where the solution table has K rows and a helper is invoked once per row, with per-row input bindings:</p>
+
+<pre><code>;; K rows in scope (one per arm)
+(get Arms _ ArmData)
+(get ArmData "arm_id" ArmId)
+(get ArmData "budget" Budget)
+
+;; Helper invoked once per row — use run-term at K=40
+(run-term BuildAllocationsRow Ctx ArmId Budget Row)   ;; CORRECT at K=40
+
+;; BAD at scale — hangs at K~40
+;; (call BuildAllocationsRow Ctx ArmId Budget Row)</code></pre>
+
+<h3>Empirical evidence</h3>
+
+<p>Two independent cases from MAB Allocate V1 (2026-04-30):</p>
+
+<ul>
+  <li><strong>BuildAllocationsRow</strong>: original <code>call</code> at K=40 produced 3 socket hangs in one debug session. Fix to <code>run-term</code> brought wall-clock to ~3–5s.</li>
+  <li><strong>CountSaForArm</strong>: original <code>call</code> at K=40 caused the engine to hang and require a database restart. Fix to <code>run-term</code> brought wall-clock to &lt;5s.</li>
+</ul>
+
+<p><strong>Empirical threshold:</strong> <code>call</code> in per-row iteration hangs somewhere between K=27 and K=40. The exact threshold is unknown. At K=40 it reliably hangs; K=27 has not been tested in the iteration-specific shape.</p>
+
+<h2>call vs run-term decision table</h2>
+
+<table>
+  <tr><th>Context</th><th>Use</th></tr>
+  <tr><td>One-solution-in / one-solution-out helper (standard shape)</td><td><code>call</code></td></tr>
+  <tr><td>List-mapping, validation, transformation helper (not per-row iteration)</td><td><code>call</code></td></tr>
+  <tr><td>Partition-before-fold scaling (replacing <code>with-group-by</code>)</td><td><code>run-term</code></td></tr>
+  <tr><td><strong>Per-row iteration at scale (K ≥ ~30 rows)</strong></td><td><strong><code>run-term</code></strong></td></tr>
+</table>
+
+<h2>What to do when you hit a hang</h2>
+
+<ol>
+  <li>Identify the per-row helper invocation(s) in the hanging clause.</li>
+  <li>Switch <code>(call Helper ...)</code> → <code>(run-term Helper ...)</code> for each per-row invocation.</li>
+  <li>Verify that the helper's logic is correct for stateless per-invocation execution (no side-effects that depend on cross-row shared state — each <code>run-term</code> call is independent).</li>
+  <li>If the engine is stalled after a hang: restart the omega-db pod.</li>
+</ol>
+
+<h2>Hypothesis on root cause</h2>
+
+<p><code>(call CapturedHelper ...)</code> per-row in a multi-solution iteration may produce solution-table residue that scales non-linearly. Each <code>call</code> invocation shares solution scope with the enclosing iteration — the K-row solution table is visible during each call. As K grows, the accumulated per-call scope overhead may compound.</p>
+
+<p><code>(run-term CapturedHelper ...)</code> runs the helper as a separate execution against a fresh solution. This isolates per-row state from the enclosing K-row iteration scope. This is the same mechanism that makes <code>run-term</code> fast in the partition-before-fold pattern — the key insight is that "fresh solution per invocation" is beneficial in both cases.</p>
+
+<p>This hypothesis is <strong>not empirically verified</strong> — it is the best current explanation for the observed behavior.</p>

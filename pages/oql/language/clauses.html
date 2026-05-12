@@ -1,0 +1,202 @@
+<h1>Clauses</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>What a clause is</h2>
+<p>A clause defines a rule — when its head is true based on its body. Clauses are defined with <code>(:- ...)</code>:</p>
+
+<pre><code>(:- (Head Arg1 Arg2 Result)
+    (some-term Arg1 Intermediate)
+    (other-term Intermediate Result))</code></pre>
+
+<p>Read this as: <strong>Head is true if the body terms are all true.</strong></p>
+
+<h2>Clause types</h2>
+
+<h3>Stored clauses</h3>
+<p>When a clause head is namespaced with a datastore and ends with <code>!</code>, it is stored in that datastore and persists across queries:</p>
+
+<pre><code>(datastore Qo.Page "omega/query-omega/page")
+
+(:- (Qo.Page/visible! PageId)
+    (Qo.Page/page-object _ ParentId PageId _)
+    (Qo.Page.Bl/page-block _ ParentId _ Block)
+    (get Block "page-id" PageId))</code></pre>
+
+<p>The <code>!</code> suffix tells the engine to write the clause to the datastore. Without <code>!</code>, calling the clause reads from the datastore. This is the read/write convention:</p>
+
+<pre><code>(Qo.Page/visible PageId)   ;; READ — query the stored clause
+(Qo.Page/visible! PageId)  ;; WRITE — define/store the clause</code></pre>
+
+<h3>In-memory clauses</h3>
+<p>When a clause head has no namespace prefix and no <code>!</code>, it exists only as a symbol binding in the current query. Think of it like a local function:</p>
+
+<pre><code>(:- (ParseSales RawSales Sales)
+    (with-table-if (= RawSales "")
+      [RawSales Sales]
+      (= Sales 0)
+      (json-stringify Sales RawSales)))</code></pre>
+
+<p>In-memory clauses are used for helper logic inside an implementation, implementation clauses registered with <code>set-implementation-clauses</code>, and captured clauses passed into stored clauses via the capture mechanism.</p>
+
+<h3>The clause term syntax</h3>
+<p><code>clause</code> is an alternative way to define an in-memory clause. Instead of <code>(:- (Name Args...) body...)</code>, you write:</p>
+
+<pre><code>(clause ParseValue [Raw Parsed]
+    (with-table-if (= Raw "")
+      [Raw Parsed]
+      (= Parsed 0)
+      (json-stringify Parsed Raw)))
+
+(call ParseValue "100" Result)   ;; Result = 100</code></pre>
+
+<p>The key difference: the <code>clause</code> form takes arguments as a vector <code>[Arg1 Arg2]</code> rather than as part of the head <code>(Name Arg1 Arg2)</code>. Both forms produce in-memory clauses invoked with <code>call</code>.</p>
+
+<h3>Inner clauses (experimental)</h3>
+<p>You can define an in-memory clause inside another clause's body. It is scoped to that execution. <strong>Warning:</strong> inner clauses are highly experimental. Stored clause writes inside inner clauses do not persist. Only use inner in-memory clauses for helper logic within a single query execution.</p>
+
+<h2>Clause size and decomposition</h2>
+
+<p>A clause body is a unit of debugging. When something throws inside a body, the stack trace dumps the entire body — the larger the body, the harder it is to localize the failure.</p>
+
+<p>The discipline:</p>
+<ol>
+  <li><strong>5–10 lines per clause body.</strong> If a body grows past ~10 terms, split it into smaller helper clauses.</li>
+  <li><strong>No nested <code>with-table-if</code>s in any clause body.</strong> Use flat sequential <code>with-table-if</code>s instead — each one does one piece of classification, the next reads the result via normal per-row unification.</li>
+  <li><strong>Compose via <code>(call SmallHelper ...)</code>, not via inline <code>(and ...)</code> blocks.</strong> A 90-line <code>(and ...)</code> holding 15 distinct concerns is the anti-pattern. Stack traces from inside the <code>(and ...)</code> lose the branch boundary.</li>
+  <li><strong>Each helper that calls captured helpers must declare its own <code>{"capture" [...]}</code>.</strong> Captures do not propagate through nested <code>call</code> / <code>run-term</code>.</li>
+</ol>
+
+<h3>Decomposition shape</h3>
+<p>The canonical shape for a workflow OnEvent or other large entry-point clause:</p>
+<ul>
+  <li><strong>One BuildCtx/ResolveCtx helper</strong> that resolves the page hierarchy and database ids into a single <code>Ctx</code> map.</li>
+  <li><strong>A handful of read helpers</strong> (one per source) each 5–10 lines.</li>
+  <li><strong>One or more compute helpers</strong> (batch, build user message, dispatch LLM, etc.) each 5–10 lines.</li>
+  <li><strong>Write helpers</strong> (one per destination), each invoked via <code>(call WriteHelper ...)</code>.</li>
+  <li><strong>A thin entry-point clause</strong> (OnEvent, Run, Install, etc.) — usually 5–15 lines — that orchestrates the sequence of <code>(call ...)</code> invocations.</li>
+</ul>
+
+<h3>Call graph shape</h3>
+<p>Every impl has a call graph — the directed tree of <code>(call X ...)</code> invocations rooted at OnEvent. The rule: <strong>2–4 children per non-leaf clause.</strong></p>
+
+<ul>
+  <li><strong>Leaf clauses</strong> do real work: one scan, one write, one string-concat chain. They have no <code>(call ...)</code> invocations.</li>
+  <li><strong>Non-leaf clauses</strong> orchestrate: their body is mostly <code>(call Child1 ...)</code>, <code>(call Child2 ...)</code>, etc. Keep to 2–4 calls.</li>
+  <li><strong>Top-level OnEvent</strong> orchestrates 2–3 phase-level orchestrators, not 10+ leaves directly.</li>
+</ul>
+
+<p><strong>The flat anti-pattern:</strong> an OnEvent that directly calls 12 sequential helpers is a flat orchestrator. A runtime failure anywhere in that body is hard to bisect. Restructure into 2–3 phase orchestrators, then verify each phase independently.</p>
+
+<h2>Implementation clause arity</h2>
+
+<p>OQL always dispatches implementation (protocol method) clauses with exactly <strong>2 positional args</strong>: <code>Exec</code> and <code>Result</code>. The clause signature is always:</p>
+
+<pre><code>(:- (MyClause Exec Result)
+    ...)</code></pre>
+
+<p>Extra method arguments are not passed as additional positional params. They arrive inside <code>Exec</code> under <code>["args" 0 ...]</code> and must be extracted with <code>get-in</code>:</p>
+
+<pre><code>(:- (InstallBranch Exec Result)
+    (get-in Exec ["args" 0 "branch-name"] BranchName)
+    (get-in Exec ["args" 0 "library-id"] LibraryId)
+    (= Result {"status" "ok"}))</code></pre>
+
+<p>Writing a 3-arg signature like <code>(:- (InstallBranch Exec Input Result) ...)</code> is wrong — the dispatcher always calls with 2 args, so the clause will never unify.</p>
+
+<h2>Closures / Capture</h2>
+
+<p>Clauses can capture symbols from the outer scope using the <code>capture</code> syntax:</p>
+
+<pre><code>(:- (MyClause A B Result {"capture" [SomeOuterVar]})
+    (+ A SomeOuterVar Result))</code></pre>
+
+<p><strong>The capture map must be the LAST element of the clause head tuple.</strong> Placing <code>{"capture" [...]}</code> anywhere in the body is silently ignored — no error is raised, captures simply do not take effect. The runtime symptom is <code>count not supported on this type: Symbol</code>.</p>
+
+<pre><code>;; WRONG — capture map is the first body term; it is silently ignored
+(:- (OnEvent Exec Result)
+    {"capture" [ResolveCtx WriteResults]}
+    (call ResolveCtx Exec Ctx)
+    (call WriteResults Ctx Result))
+
+;; CORRECT — capture map is the last element of the head tuple
+(:- (OnEvent Exec Result {"capture" [ResolveCtx WriteResults]})
+    (call ResolveCtx Exec Ctx)
+    (call WriteResults Ctx Result))</code></pre>
+
+<h3>Captures are not transitive</h3>
+
+<p>Capture scope is <strong>per-clause only</strong>. When OnEvent captures <code>[ProcessAnalyst]</code> and calls <code>(call ProcessAnalyst ...)</code>, ProcessAnalyst runs inside its own scope. If ProcessAnalyst needs <code>ThinkPhase</code>, it must declare <code>{"capture" [ThinkPhase]}</code> itself.</p>
+
+<p><strong>The rule: every <code>(call X ...)</code> must have <code>X</code> in that clause's own <code>{"capture" [...]}</code>.</strong> There is no capture inheritance across call boundaries.</p>
+
+<p><strong>Symptom of a broken capture chain:</strong></p>
+<pre><code>TermExecutionRunnable found for class: clojure.lang.Symbol</code></pre>
+
+<pre><code>;; WRONG — two-level chain where OnEvent hopes ProcessAnalyst's captures cascade up
+(:- (OnEvent Exec Result {"capture" [ProcessAnalyst]})
+    (call ProcessAnalyst Exec Result))
+
+(:- (ProcessAnalyst Exec Result {"capture" [ThinkPhase FormatPhase]})
+    (call ThinkPhase Exec ThinkOut)
+    (call FormatPhase ThinkOut Result))
+
+;; CORRECT — OnEvent flattens: captures every helper it will ever call, directly
+(:- (OnEvent Exec Result
+             {"capture" [ResolveAnalystCtx ProcessThinkPhase ProcessFormatPhase]})
+    (call ResolveAnalystCtx Exec Ctx)
+    (call ProcessThinkPhase Ctx ThinkOut)
+    (call ProcessFormatPhase ThinkOut Result))</code></pre>
+
+<h3>Captured in-memory helpers are only callable from the clause that declared them</h3>
+
+<p>A captured in-memory helper is callable only from the clause whose head declares the <code>{"capture" [...]}</code> — not from any clause invoked via <code>(call ...)</code> from that declaring clause. The fix is always to flatten: the clause that has access to captured helpers must call them directly.</p>
+
+<h3>Related scoping gotchas</h3>
+<ul>
+  <li><strong>Lexical scope</strong> — what survives into a clause body, the push-time vs runtime scope split, and the "Capture Only Works With call" rule.</li>
+  <li><strong>with-table-if header must include captured clause symbols</strong> — even after capture has threaded a clause symbol into the surrounding body, a <code>with-table-if</code> branch needs that symbol listed in its header to see it.</li>
+  <li><strong>run-term does not work on in-memory clauses</strong> — capture targets must be stored functors when reached via <code>run-term</code>. For in-memory captured helpers, use <code>call</code>. The only valid <code>run-term</code> shape for captured in-memory helpers is the partition-before-fold pattern or per-row iteration at scale (K ≥ ~30 rows).</li>
+</ul>
+
+<h3>Captured helpers must be defined before they are captured</h3>
+
+<p><strong>Symptom:</strong> a stored implementation pushes successfully, but <code>qo run</code> fails at runtime with:</p>
+<pre><code>omega/jvm/IllegalArgumentException
+No implementation of method: :run-with-args ... found for class: clojure.lang.Symbol</code></pre>
+
+<p>The root cause: a captured helper was referenced in a clause's <code>{"capture" [...]}</code> before it was defined in the same push file. In OQL, the top-level scope of an implementation file runs once at push time — earlier statements cannot refer to symbols that are defined later. Define all helper clauses before the clause that captures them.</p>
+
+<h2>fold in clause bodies</h2>
+
+<p><code>fold</code> is a solution-wide reducer. Two edge-case behaviors can surprise you in clause bodies:</p>
+
+<h3>fold with zero input solutions produces zero output solutions</h3>
+
+<p><code>fold</code> does <strong>not</strong> bind its accumulator to the <code>Init</code> value when the upstream has zero solutions. If the upstream term produces zero rows, <code>fold</code> produces zero rows — the <code>Agg</code> symbol is left unbound. Use the count-then-fold workaround documented in the Reducers reference.</p>
+
+<h3>The count-then-fold workaround</h3>
+
+<pre><code>(with-table-if (&lt;upstream scan producing PerRowSym&gt;)
+  [&lt;header including List&gt;]
+  (fold [] PerRowSym append List)
+  (= List []))
+;; List is bound on both paths — fold path and empty path.
+(length List Count)  ;; outside the with-table-if; works on both paths</code></pre>
+
+<p>The <code>fold</code> symbol must be per-row-unique — one distinct value per upstream row — because fold deduplicates over its input symbol.</p>
+
+<h2>Hard Rules</h2>
+
+<p>These are non-negotiable rules for writing OQL. Every one of them has produced real data loss, index corruption, or silent wrong-answer bugs in production. Read these before writing any line of OQL.</p>
+
+<ol>
+  <li><strong>Never open a <code>system/</code> datastore directly.</strong> The <code>system/</code> namespace holds subscriptions and internal runtime state. Direct access can wipe critical state the runtime depends on. Use a public API clause instead. <code>(datastore X "system/...")</code> is forbidden.</li>
+  <li><strong>Never open internal data-layer datastores directly.</strong> The internal data layer lives under <code>omega/query-omega/data/...</code>. Opening it directly bypasses access control, schema guarantees, and every invariant the public API enforces. Use <code>Qo.Db.Prop/</code>, <code>Qo.Page/</code>, or <code>Qo.Public.OqlApi.*/</code> instead. For read-only row counts, use <code>omega-cli db-name</code> + <code>curl GET /&lt;db&gt;/</code> to read <code>doc_count</code>.</li>
+  <li><strong>Never run mutations in scratch files.</strong> Scratch files are read-only. No <code>delete!</code>, no <code>refresh</code>, no <code>!</code>-suffixed write terms. Mutations belong in deployed implementations invoked via <code>qo push</code> + <code>qo run</code>. Using <code>(Ds/term! Args)</code> in a scratch query invokes the write pathway and throws <code>WRITING_SYMBOLS</code> if <code>Args</code> contains unbound symbols.</li>
+  <li><strong>Never use <code>refresh</code> on any datastore.</strong> <code>refresh</code> wipes the datastore and breaks the CouchDB indexes that back it. The indexes do not rebuild automatically. There is no legitimate workflow that calls <code>refresh</code>.</li>
+  <li><strong>Never use boolean <code>true</code> / <code>false</code> in OQL — use strings.</strong> OQL's solution engine handles native booleans incorrectly, producing silent wrong answers. Always use the strings <code>"true"</code> and <code>"false"</code>. This applies everywhere: term arguments, map values, comparisons, defaults. <code>(= Flag true)</code> is forbidden. Use <code>(= Flag "true")</code>.</li>
+</ol>
+
+<p>Treat a temptation to violate any of these as a sign that you are solving the wrong problem.</p>

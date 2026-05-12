@@ -1,0 +1,240 @@
+<h1>Control Flow</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>OQL's control flow operates on solution tables. Understanding the distinction between universal quantifiers (<code>when</code>, <code>when-not</code>, <code>if</code>) and per-solution branching (<code>with-table-if</code>) is critical. <strong>Read this entire document before writing any conditionals.</strong></p>
+
+<h2>when / when-not / if (universal quantifiers)</h2>
+
+<p>These operate as <strong>"if any"</strong> — they pass or fail based on whether any solution in the current solution set satisfies the condition. They do not branch per-solution.</p>
+
+<pre><code>;; (when) — runs body if the condition succeeds for any solution
+(when (= Step "score")
+  (= PageName "Score Agents"))
+
+;; (when-not) — runs body if the condition fails for all solutions
+(when-not (get Data "skip" Skip)
+  (= Skip 0))
+
+;; (if) — binds one of two values based on whether condition succeeds
+(if (get Data "continue" "false")
+  (= ShouldContinue "false")
+  (= ShouldContinue "true"))</code></pre>
+
+<p>Use <code>when</code> for flat dispatch (like a switch/case):</p>
+<pre><code>(when (= Step "score")  (= PageName "Score Agents"))
+(when (= Step "filter") (= PageName "Filter Agents"))
+(when (= Step "batch")  (= PageName "GHL Sync"))</code></pre>
+
+<h2>with-table-if (per-solution branching)</h2>
+
+<p><code>with-table-if</code> branches <strong>per solution</strong>. The condition evaluates within the parent solution, and each branch creates its own table solution.</p>
+
+<pre><code>(with-table-if Condition
+  [Var1 Var2 Result]          ;; table head — variables in scope for both branches
+  ThenBranch                   ;; runs for solutions where Condition succeeds
+  ElseBranch)                  ;; runs for solutions where Condition fails</code></pre>
+
+<h3>SQL analogy</h3>
+<p>Think of <code>with-table-if</code> as four steps: a <code>SELECT DISTINCT &lt;schema&gt;</code> projection, then an INNER JOIN for the then-branch, a LEFT OUTER JOIN for the else-branch, and a UNION of both halves. Three key consequences:</p>
+<ol>
+  <li>The <code>SELECT DISTINCT</code> at step 1 is where row collapse happens — rows with identical values for every schema variable merge into one.</li>
+  <li>The then-branch is an inner join — <code>(= true false)</code> fails unification, which drops the row.</li>
+  <li>The else-branch is conventionally a left outer join — almost always <code>(= true true)</code>, a no-op pass-through.</li>
+</ol>
+
+<h3>The existence-check fallacy (then-branch runs K times, not once)</h3>
+
+<p><strong>This is one of the most common <code>with-table-if</code> mistakes, and it causes exponential output blowup that is hard to diagnose.</strong></p>
+
+<p>The mental model: <strong>"for each solution from the condition, run then-branch; if the condition has zero solutions, run else-branch once."</strong></p>
+
+<p>This is NOT an existence check. If <code>prop-vals-by-folder</code> generates K rows, every downstream term in the then-branch runs K times. If your then-branch calls a helper that generates M solutions, you get K×M solutions — a hidden cross-product.</p>
+
+<pre><code>;; BAD — "existence check" with multi-row condition
+;; If MemoryFolder has K rows, the then-branch runs K times
+(with-table-if (prop-vals-by-folder MemoryDbId MemFolderPid _)
+  [MemoryDbId MemFolderPid LatestRev]
+  (run-term ReadLatestRevision MemoryDbId LatestRev)   ;; runs K times
+  (= LatestRev "0000"))
+
+;; GOOD — aggregate the condition first; then-branch runs exactly once
+(with-table-if (prop-vals-by-folder MemoryDbId MemFolderPid _)
+  [MemoryDbId MemFolderPid MemRows]
+  (fold [] MemPid append MemRows)
+  (= MemRows []))
+
+(with-table-if (&gt; (length MemRows 0) 0)
+  [MemoryDbId MemRows LatestRev]
+  (run-term ReadLatestRevision MemoryDbId LatestRev)   ;; runs exactly once
+  (= LatestRev "0000"))</code></pre>
+
+<p><strong>To get true existence-check semantics:</strong> aggregate the condition via fold first, or use <code>run-page-by-id</code> against a query page that returns at most one result.</p>
+
+<h3>Preserving per-row identity</h3>
+
+<p><strong>This is the most common source of silent row loss.</strong></p>
+
+<p>When the solution table has multiple rows, the merge after branching is effectively a <code>SELECT DISTINCT &lt;schema&gt;</code> union. If two rows have identical values for every variable in the schema, they collapse into one row.</p>
+
+<p>Always include <strong>at least one variable that is unique per row</strong> in the schema — typically a primary key, URL, or UUID.</p>
+
+<pre><code>;; BAD — silent row collapse if two agents have the same AgentStatus and HttpStatus
+(with-table-if (and (= AgentStatus "create")
+                    (= HttpStatus 422))
+  [AgentStatus HttpStatus]     ;; schema has no per-row identity
+  (= true false)
+  (= true true))
+
+;; GOOD — AgentLink anchors per-row identity
+(with-table-if (and (= AgentStatus "create")
+                    (= HttpStatus 422))
+  [AgentLink AgentStatus HttpStatus]   ;; AgentLink is unique per agent
+  (= true false)
+  (= true true))</code></pre>
+
+<h3>Dropping rows from the solution</h3>
+
+<p>A <code>with-table-if</code> can be used to drop rows by having the then-branch fail to unify. The idiomatic form is <code>(= true false)</code>:</p>
+
+<pre><code>(with-table-if (and (= AgentStatus "create")
+                    (= HttpStatus 422))
+  [AgentLink AgentStatus HttpStatus]
+  (= true false)    ;; then: fail the branch — row drops from the solution
+  (= true true))    ;; else: pass through unchanged</code></pre>
+
+<h3>Throw in the else-branch does not halt the enclosing clause</h3>
+
+<p><strong>A <code>throw</code> inside a <code>with-table-if</code> branch does NOT propagate out of the branch and stop the enclosing clause body.</strong> The throw fires within the branch's own scope and terminates that solution path, but OQL continues executing subsequent terms in the enclosing clause with whatever bindings survived.</p>
+
+<p>The critical consequence: any schema variable that was supposed to be bound by the then-branch remains unbound as a raw <code>clojure.lang.Symbol</code>.</p>
+
+<p><strong>Fix: move any term that depends on schema variables inside the then-branch, not after the <code>with-table-if</code>.</strong></p>
+
+<pre><code>;; BAD — (call Func ...) runs even when Func was never bound
+(with-table-if (lookup-deletable-functor DbId Name Func)
+  [DbId Name Func Deletable Result]
+  (= Deletable {"id" Name})
+  (throw "NOT_FOUND" {"name" Name}))
+(call Func Deletable Result)   ;; runs even when Func is unbound
+
+;; GOOD — move the call inside the then-branch
+(with-table-if (lookup-deletable-functor DbId Name Func)
+  [DbId Name Func Deletable Result]
+  (and (= Deletable {"id" Name})
+       (call Func Deletable Result))
+  (throw "NOT_FOUND" {"name" Name}))</code></pre>
+
+<h3>When the condition is batch-wide, not per-row</h3>
+
+<p><code>(defined X)</code> checks whether the symbol <code>X</code> is bound in the current lexical context, not whether a specific row has a value. Inside a branch where <code>X</code> is in scope, <code>(defined X)</code> is always true — every row sees a bound <code>X</code>.</p>
+
+<p><strong>Never use <code>(defined X)</code> alone as the condition for <code>with-table-if</code>. Always combine it with a concrete per-row predicate.</strong></p>
+
+<pre><code>;; BAD — (defined X) is effectively universal
+(with-table-if (defined SuccessId)
+  [AgentLink SuccessId GhlContactId AgentStatus]
+  (and (= GhlContactId SuccessId) (= AgentStatus "created"))
+  (= true true))
+
+;; GOOD — combine with a per-row value check
+(with-table-if (and (= AgentStatus "create") (defined SuccessId))
+  [AgentLink SuccessId GhlContactId AgentStatus]
+  (and (= GhlContactId SuccessId) (= AgentStatus "created"))
+  (= true true))</code></pre>
+
+<h3>Body scope rules</h3>
+
+<p>Inside a <code>with-table-if</code> branch body:</p>
+<ol>
+  <li>Only symbols listed in the schema <code>[A B Result]</code> flow in from the outer scope.</li>
+  <li>Symbols bound in <code>CONDITION</code> do NOT automatically flow into the branch body — include them in the schema OR re-bind inside the body (the check-then-rebind idiom).</li>
+  <li>Symbols bound inside the branch body are local to that branch and do not escape to downstream clauses.</li>
+</ol>
+
+<pre><code>;; BAD — Val is bound by the condition but not listed in the schema
+(with-table-if (get Data "key" Val)
+  [Data Result]
+  (= Result {"found" Val})       ;; Val is unbound here
+  (= Result {"found" "default"}))
+
+;; GOOD — list Val in the schema so it flows into the body
+(with-table-if (get Data "key" Val)
+  [Data Val Result]
+  (= Result {"found" Val})
+  (= Result {"found" "default"}))</code></pre>
+
+<h3>The Ctx-threading pattern</h3>
+
+<p>Large implementations typically roll configuration into a single <code>Ctx</code> map at the top of the query and thread <code>Ctx</code> through every <code>with-table-if</code> schema. Inside each branch body, pull the fields you need back out of <code>Ctx</code>:</p>
+
+<pre><code>(= Ctx {"filtered-folder-id" FilteredFolderId
+        "ghl-contacts-folder-id" GhlContactsFolderId
+        "auth-header" AuthHeader})
+
+(with-table-if (and (= AgentStatus "create") ...)
+  [AgentLink Ctx AgentStatus Res HttpStatus]
+  (and (get Ctx "auth-header" FlowAuthHeader)
+       (get Ctx "ghl-contacts-folder-id" FlowGhlFolderId)
+       ...)
+  (= true true))</code></pre>
+
+<h3>The binding list as JOIN key</h3>
+
+<p>The binding list is not just a visibility declaration — it is the JOIN key between the outer solution table and the inner branch. Any outer-scope variable the inner branch needs must appear in the binding list. If you omit a variable, the inner branch runs independently and results lose their association with the outer rows.</p>
+
+<pre><code>;; WRONG — Data is not in the binding list; association is severed
+(with-table-if (get Data "campaign_id" SpecificId)
+  [SpecificId CampaignIds]
+  (= CampaignIds [SpecificId])
+  ...)
+
+;; RIGHT — Data is in the binding list; association preserved
+(with-table-if (get Data "campaign_id" SpecificId)
+  [Data SpecificId CampaignIds]
+  (= CampaignIds [SpecificId])
+  ...)</code></pre>
+
+<h3>Nesting</h3>
+
+<p><strong>Nesting is allowed</strong> for multi-step parsing but adds real costs: stack traces lose the branch boundary, and schema discipline compounds. Prefer <strong>flat sequential <code>with-table-if</code>s</strong> over nesting when possible.</p>
+
+<pre><code>;; GOOD — flat, sequential. Each step does one thing.
+(with-table-if (= RawSales "")
+  [AgentLink RawSales SalesBucket]
+  (= SalesBucket "empty")
+  (= SalesBucket "nonempty"))
+
+(with-table-if (and (= SalesBucket "nonempty") (number RawSales))
+  [AgentLink RawSales SalesBucket Sales]
+  (= Sales RawSales)
+  (= true true))</code></pre>
+
+<h2>There is no not operator</h2>
+
+<p>OQL does not have a <code>(not ...)</code> operator. The correct way to express "complement of CONDITION" is the else-branch of a single <code>with-table-if</code>:</p>
+
+<pre><code>;; BAD — (not ...) is not an OQL primitive
+(with-table-if (or (not (get [200 201] _ HttpStatus))
+                   (not (get ParsedRes "customFields" _)))
+  [AgentLink Result]
+  (= Result {"status" "error"})
+  (= true true))
+
+;; GOOD — a single with-table-if with both branches
+(with-table-if (and (get [200 201] _ HttpStatus)
+                    (get ParsedRes "customFields" _))
+  [AgentLink Result]
+  (= Result {"status" "ok"})
+  (= Result {"status" "error" "reason" "missing-fields"}))</code></pre>
+
+<h2>When to use which</h2>
+
+<table>
+  <tr><th>Pattern</th><th>Use when</th></tr>
+  <tr><td><code>when</code></td><td>Flat dispatch — run body if condition matches any solution</td></tr>
+  <tr><td><code>when-not</code></td><td>Default values — bind a symbol when it's not already bound</td></tr>
+  <tr><td><code>if</code></td><td>Bind one of two values based on a condition</td></tr>
+  <tr><td><code>with-table-if</code></td><td>Per-solution branching — conditionally bind variables, parse values</td></tr>
+</table>
