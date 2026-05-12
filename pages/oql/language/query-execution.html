@@ -1,0 +1,157 @@
+<h1>Query Execution &amp; Index Selection</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>This document covers how the OQL engine selects an execution strategy when evaluating a term query, and how <code>with-sort</code>, <code>with-skip</code>, and <code>with-limit</code> behave under each strategy. Understanding this is essential for avoiding silent correctness bugs where pagination parameters are silently ignored.</p>
+
+<h2>The four strategies</h2>
+
+<h3>Strategy 1 — Defterm PK lookup</h3>
+
+<p><strong>When it fires:</strong> the bound columns exactly match the term's declared primary key.</p>
+<p><strong>Mechanism:</strong> the engine computes deterministic row ids from the PK values and fetches them in a single <code>_all_docs</code> POST.</p>
+
+<table>
+  <tr><th>Operator</th><th>Pushed?</th></tr>
+  <tr><td><code>with-limit</code></td><td><strong>No</strong></td></tr>
+  <tr><td><code>with-skip</code></td><td><strong>No</strong></td></tr>
+  <tr><td><code>with-sort</code></td><td><strong>No</strong></td></tr>
+</table>
+
+<h3>Strategy 2a — Exact write-index bind</h3>
+
+<p><strong>When it fires:</strong> a <code>write-index</code> covers the bound positions, AND the number of bound positions equals the total number of fields in the index (every index field is bound).</p>
+<p><strong>Mechanism:</strong> a single POST with <code>{:keys ks}</code> against the view.</p>
+
+<table>
+  <tr><th>Operator</th><th>Pushed?</th></tr>
+  <tr><td><code>with-limit</code></td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>with-skip</code></td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>with-sort "desc"</code></td><td><strong>Yes</strong></td></tr>
+</table>
+
+<p>This is the highest-performance path and the only one where all three operators are fully pushed down.</p>
+
+<h3>Strategy 2b — Prefix bind, one bound row</h3>
+
+<p><strong>When it fires:</strong> a <code>write-index</code> covers the bound positions as a prefix AND there is exactly one bound row.</p>
+<p><strong>Mechanism:</strong> a range query using <code>startkey</code> / <code>endkey</code>. The endkey sentinel is <code>(conj (vec bound-key) {})</code> — an empty map sorts after all scalar values in CouchDB's collation order, closing the range.</p>
+
+<table>
+  <tr><th>Operator</th><th>Pushed?</th></tr>
+  <tr><td><code>with-limit</code></td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>with-skip</code></td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>with-sort</code></td><td><strong>Yes</strong></td></tr>
+</table>
+
+<h3>Strategy 2c — Prefix bind, N bound rows</h3>
+
+<p><strong>When it fires:</strong> a <code>write-index</code> covers the bound positions as a prefix AND there are two or more distinct bound rows.</p>
+<p><strong>Mechanism:</strong> one <code>lazy-range-fetch</code> per bound row, merged via a k-way merge heap (<code>omega-db.datastore.couchdb.heap-merge/k-way-merge</code>). Memory cost is O(K) where K is the number of ranges.</p>
+
+<table>
+  <tr><th>Operator</th><th>Pushed?</th></tr>
+  <tr><td><code>with-limit</code></td><td><strong>No</strong> — applied AFTER merge</td></tr>
+  <tr><td><code>with-skip</code></td><td><strong>No</strong> — applied AFTER merge</td></tr>
+  <tr><td><code>with-sort</code></td><td><strong>Partially</strong> — drives the merge key-fn, not pushed to individual view requests</td></tr>
+</table>
+
+<p>If a query binds multiple values across two dimensions and a secondary index covers only the first dimension as a prefix, OQL will silently issue one range fetch per outer-dimension value and merge them in memory. <code>with-limit 10</code> will still return only 10 rows, but the database may scan far more.</p>
+
+<h3>Strategy 3 — Mango fallback</h3>
+
+<p><strong>When it fires:</strong> no <code>write-index</code> covers the bound positions as a prefix AND <code>(enable-full-scan)</code> is active.</p>
+<p><strong>Mechanism:</strong> a CouchDB Mango query against the raw document store.</p>
+
+<table>
+  <tr><th>Operator</th><th>Pushed?</th></tr>
+  <tr><td><code>with-limit</code></td><td><strong>No</strong></td></tr>
+  <tr><td><code>with-skip</code></td><td><strong>No</strong></td></tr>
+  <tr><td><code>with-sort</code></td><td><strong>No</strong></td></tr>
+</table>
+
+<p>The Mango path returns up to the page-query default ceiling (effectively unbounded). <code>with-limit</code> and <code>with-skip</code> are <strong>silently ignored</strong> — the query returns all matching rows with no error or warning. The page-query default limit is 1,000,000 — effectively unbounded. If a caller passes <code>with-limit 10</code> but hits the Mango fallback, the query quietly returns up to one million rows instead of ten.</p>
+
+<h3>Strategy 4 — No-matching-index error</h3>
+
+<p><strong>When it fires:</strong> no <code>write-index</code> covers the bound positions AND <code>enable-full-scan</code> is NOT active.</p>
+<p><strong>Mechanism:</strong> the engine throws immediately:</p>
+<pre><code>{:type "omega/query/no-matching-index"
+ :bound-positions [...]
+ :candidate-indexes [...]}</code></pre>
+
+<p>This is the safest outcome — it surfaces the problem explicitly rather than silently scanning.</p>
+
+<h2>Operator push-down summary</h2>
+
+<table>
+  <tr><th>Strategy</th><th>with-limit</th><th>with-skip</th><th>with-sort</th></tr>
+  <tr><td>1 — Defterm PK lookup</td><td>Not pushed</td><td>Not pushed</td><td>Not pushed</td></tr>
+  <tr><td>2a — Exact write-index</td><td>Pushed</td><td>Pushed</td><td>Pushed</td></tr>
+  <tr><td>2b — Prefix bind, 1 row</td><td>Pushed</td><td>Pushed</td><td>Pushed</td></tr>
+  <tr><td>2c — Prefix bind, N rows</td><td><strong>Not pushed</strong></td><td><strong>Not pushed</strong></td><td>Drives merge</td></tr>
+  <tr><td>3 — Mango fallback</td><td>Not pushed</td><td>Not pushed</td><td>Not pushed</td></tr>
+  <tr><td>4 — No-index error</td><td>—</td><td>—</td><td>—</td></tr>
+</table>
+
+<p><strong>Note:</strong> the Mango-fallback rule above applies only to <code>with-skip</code> and <code>with-limit</code>. It does NOT apply to <code>with-count</code>. <code>with-count</code> reads CouchDB view metadata and never falls back to Mango.</p>
+
+<h2>Index selection algorithm</h2>
+
+<p><strong>Prefix test:</strong> an index qualifies as a candidate if its <code>:fields</code> vector starts with the bound <code>args.N</code> strings in order.</p>
+
+<p><strong>Candidate ranking:</strong> among all qualifying candidates, the engine selects the one with the shortest field list (closest match to the bound positions).</p>
+
+<p><strong>Defterm PK priority:</strong> the PK-exact-match path (Strategy 1) is checked before the write-index paths.</p>
+
+<h2>What callers must do</h2>
+
+<p>Ensure the bound args in the clause call match a declared view index. If the args don't match, the runtime falls back to Mango and skip/limit become no-ops.</p>
+
+<p>For example, <code>FolderIndex</code> indexes on <code>args.1</code>. A clause call that binds <code>args.1</code> to a folder ID will resolve through <code>FolderIndex</code> and skip/limit will work. A clause call that only binds <code>args.2</code> won't match <code>FolderIndex</code>, will fall back to Mango, and skip/limit will be ignored.</p>
+
+<h2>Singleton-row term lookup</h2>
+
+<p>Some terms hold exactly one row by design — a global config, a singleton service descriptor. The natural call shape for reading that row is arity-1 with the single arg as the output:</p>
+
+<pre><code>(Qo.Schema.Schema/config-data Config)</code></pre>
+
+<p>There is no input arg to constrain on. This shape sits at the seam of the engine's index-matching model and has no clean answer in OQL today. The empty bound-arg set matches no declared index — no view-key prefix can be constructed, so no view query is possible. Mango is the only fallback, which fires the <code>omega/query/full-scan</code> throw.</p>
+
+<p>The only working answer today is to bookend the call with <code>(enable-full-scan)</code> / <code>(disable-full-scan)</code>, with a comment pointing back to this pattern. A defterm doesn't help because a defterm with an empty primary key is not a documented or supported declaration. This is a placeholder for a missing engine pattern — not an over-binding fix that was deferred.</p>
+
+<p><strong>Adjacent shapes that are NOT the singleton case:</strong></p>
+<ul>
+  <li><strong>By-id lookup of a known row</strong> — if the caller has the row's id or any indexed field, bind it and read through the existing index.</li>
+  <li><strong>Per-parent singleton</strong> — a term that holds one row per parent is a normal pkey-on-parent-id lookup.</li>
+  <li><strong>Cardinality-1 by accident</strong> — a term that happens to have one row in a particular environment but is not architecturally singular has a normal index.</li>
+</ul>
+
+<h2>OQL execution model overview</h2>
+
+<p>Every term takes a solution set in, transforms it, and produces a new solution set out. Terms are not expressions — they do not return values that can be nested inside map literals or other terms.</p>
+
+<pre><code>;; WRONG — the runtime does not evaluate (if ...) inside the map literal
+(= Result {"key" (if (= X "") "a" "b")})
+
+;; CORRECT — bind first, reference later
+(if (= X "") (= Status "a") (= Status "b"))
+(= Result {"key" Status})</code></pre>
+
+<p>Think of each term as a CTE (Common Table Expression) in SQL: the engine takes the current solution set, evaluates the term for each row, and joins the results back in. This is why OQL can blow up: 1000 rows from a page query joined with a prop-vals lookup is a 1000-way join.</p>
+
+<p><strong>Index matching rules:</strong></p>
+<ul>
+  <li>Check the defterm's primary key and indexes before writing any query against it.</li>
+  <li>Bind ONLY the arguments that match an index — use <code>_</code> for everything else.</li>
+  <li>Row-index keys are always arrays, even for single-column primary keys: <code>["value"]</code> not <code>"value"</code>.</li>
+</ul>
+
+<pre><code>;; Row index lookup — key must be an array
+(Qo.Db.Prop/row-index FolderId ["https://example.com"] PageId)   ;; CORRECT
+(Qo.Db.Prop/row-index FolderId "https://example.com" PageId)     ;; WRONG</code></pre>
+
+<p><strong>No transactions:</strong> datastore writes happen immediately during execution. If a term writes data and a later term fails, the write is not undone.</p>
+
+<p><strong>Deprecated: <code>def-query</code> / <code>with-query</code>.</strong> Older code uses <code>(def-query Q [...] body)</code> + <code>(with-query Q)</code> for scoping. Do not use these in new code — they cause silent <code>no-return</code> failures when used in stored implementations invoked via dispatch. Use <code>with-table-if</code> for conditionals and inline <code>(:- ...)</code> clauses for scoping.</p>

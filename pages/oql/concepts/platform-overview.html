@@ -1,0 +1,77 @@
+<h1>Platform Overview</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>What is Omega?</h2>
+
+<p>Omega is a notebook-based application platform backed by a logic database. In Omega, everything is a <strong>page</strong>. A page can hold code, data, configuration, and logs — just like a cell in a notebook can hold different kinds of content. Pages are organized into trees, and the whole system is queryable and programmable through OQL (Omega Query Language), a datalog-style logic language.</p>
+
+<h2>The Notebook</h2>
+
+<p>The core of Omega is a notebook. You create pages, add blocks to them, and build applications by composing pages together. The notebook runs in a browser, but you can also interact with it entirely from the command line using the <code>qo</code> CLI.</p>
+
+<p>A page can have several kinds of blocks:</p>
+<ul>
+  <li><strong>Code blocks</strong> — OQL implementations that define behavior</li>
+  <li><strong>Data blocks</strong> — database tables with rows, properties, indexes</li>
+  <li><strong>Config blocks</strong> — push connectors that store key-value configuration (like environment variables)</li>
+  <li><strong>Log blocks</strong> — log streams for observability</li>
+</ul>
+
+<p>When you write code in a page's code block and save it, the code is evaluated immediately — clause definitions are stored in the database, ready to be invoked later. This is how Omega works: code and data live together in the same system.</p>
+
+<h2>Pages</h2>
+
+<p>Everything in Omega lives on a page. A page is a container that can hold code, data, configuration, and logs. Pages are organized into a tree — every page has a parent, and can have children.</p>
+
+<p>The page tree is how Omega organizes an application:</p>
+
+<pre><code>My App/
+  Event Listener/          &lt;- has a log stream, receives events
+  Events/
+    Coordinator/           &lt;- code block: routes events to steps
+    Score Agents/          &lt;- code block: scoring logic
+    Filter Agents/         &lt;- code block: filtering logic
+  Data/
+    Scored Agents/         &lt;- data block: database table
+    Filtered Agents/       &lt;- data block: database table</code></pre>
+
+<h3>Agent-readable page trees</h3>
+
+<p><code>qo doc push</code> creates <strong>bare folder pages</strong> — folder nodes with no content, just a name and children. An agent running <code>qo ls "Docs/MAB"</code> sees child names but has no signal about what is in each folder without descending blind.</p>
+
+<p>The fix: a <code>README.html</code> file at every directory level in the <code>pages/&lt;project&gt;/</code> source tree. When pushed to OmegaAI, each <code>README.html</code> becomes a doc page named <code>README</code>, a child of its parent folder. Agents navigating the doc tree use these README pages as navigation roots — reading the folder summary before deciding which child to descend into. This eliminates the need to exhaustively list every subtree to answer a question.</p>
+
+<h2>OQL as the logic layer</h2>
+
+<p>OQL is a logic programming language inspired by Datalog and Prolog. Instead of writing step-by-step procedures, you describe relationships and constraints, and the database engine finds all solutions that satisfy them.</p>
+
+<p>The core insight: all computation is ultimately relational, not operational. A relation is the algebra of logic itself: AND, OR, NOT over data. Functions are a special case of relations — they constrain the output to exactly one value per input. Relations are the general case.</p>
+
+<p>Imperative code encodes two things fused together: the logic (what you want) and the execution strategy (how to get it). Relational code encodes only the logic. The execution strategy is left to the engine. This means imperative code contains accidental complexity by definition — every <code>for</code> loop, every <code>if</code> chain, every callback is an execution decision that has nothing to do with the problem being solved.</p>
+
+<p>OQL dissolves this. A relation says "these things are true together." It doesn't say in what order to check them, how to traverse the data, or what to do first. It is a pure statement of what is true.</p>
+
+<h2>OQL language fundamentals</h2>
+
+<p>The basic unit of OQL is a <strong>term</strong> — a statement that is either true or false.</p>
+
+<pre><code>(blue "Sky")           ;; "Sky" is blue
+(even 2)               ;; 2 is even
+(- 6 1 5)              ;; 6 - 1 = 5</code></pre>
+
+<p>Capitalized names are <strong>symbols</strong> (variables). The engine tries to find values for symbols that make all terms true simultaneously. This is <strong>unification</strong> — the engine doesn't assign variables top-down like imperative code. It finds consistent bindings across all terms.</p>
+
+<p>OQL works natively with JSON-like maps:</p>
+
+<pre><code>;; Bind Name to whatever value is at "name"
+(get Page "name" Name)
+
+;; Constrain — only succeeds if name is "Score Agents"
+(get Page "name" "Score Agents")
+
+;; Nested access
+(get-in Page ["page-data" "name"] Name)</code></pre>
+
+<p>Unification applies to every term. When you write <code>(get Map "key" Value)</code>, the third argument is unified — if <code>Value</code> is unbound, it binds to whatever the key holds. If <code>Value</code> is a literal, the term only succeeds when the key's value matches that literal. This matters for control flow: <code>(if Condition Then Else)</code> checks whether <code>Condition</code> <strong>succeeds as a term</strong>, not whether it returns a truthy value.</p>

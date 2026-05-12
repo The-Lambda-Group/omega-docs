@@ -1,0 +1,18 @@
+<h1>OQL Guides</h1>
+
+<p>Step-by-step recipes for working with OQL. Each doc answers a specific "how do I..." question. Read the develop-oql guide first — it is the foundation everything else builds on, and every OQL implementation plan must list it as the single most important doc.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="develop-oql">Develop OQL</a> — The REPL-driven authoring and triage manual. Operating rules, the inspect-by-mutating-Result mechanic, the push-run loop, and both the forward (authoring) and backward (debugging) directions of the same loop.</li>
+  <li><a href="debug-triage">Debug &amp; Triage</a> — Minimum reproduction discipline, narrowing an OQL failure by stripping the frame, triaging full-scan and no-return errors, returning early to inspect intermediate state, and the check-data-table-integrity procedure.</li>
+  <li><a href="scratch-queries">Scratch Queries</a> — How to write scratch queries that always end with <code>(return [Result])</code>, what scratch files can and cannot do (read-only), and the count-rows-in-a-defterm CouchDB doc_count recipe.</li>
+  <li><a href="deployment">Deployment</a> — Library-side vs installed-side components, deploying a fix to a running installed component, testing at realistic batch sizes, and the Thompson-sampling allocation step verification pattern.</li>
+  <li><a href="data-operations">Data Operations</a> — Drop rows with forced unification failure, handle HTTP 422 responses in status dispatch, and the code-step pagination pattern for multi-batch coordinator firings.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>CLI usage, MCP server setup, and project-specific operational procedures live in their respective project repos. Platform concepts (what is Omega, pages, components, plugins) live in <a href="../concepts">Concepts</a>.</p>

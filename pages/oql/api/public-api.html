@@ -1,0 +1,147 @@
+<h1>Public API Reference</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>All public OQL API clauses. These are the stable interfaces for component code — never call internal datastores directly.</p>
+
+<h2>Qo.Public.OqlApi.Page</h2>
+
+<p>Page tree navigation and mutation. Datastore: <code>omega/query-omega/public/oql-api/page</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>root-folder</code></td><td><code>(Qo.Public.OqlApi.Page/root-folder AppId RootFolderId)</code></td></tr>
+  <tr><td><code>page-by-id</code></td><td><code>(Qo.Public.OqlApi.Page/page-by-id PageId Page)</code></td></tr>
+  <tr><td><code>pages-by-folder</code></td><td><code>(Qo.Public.OqlApi.Page/pages-by-folder FolderId Page)</code></td></tr>
+  <tr><td><code>parent-page</code></td><td><code>(Qo.Public.OqlApi.Page/parent-page Page ParentPage)</code></td></tr>
+  <tr><td><code>child-by-name</code></td><td><code>(Qo.Public.OqlApi.Page/child-by-name ParentPageId Name ChildPage)</code></td></tr>
+  <tr><td><code>child-page-by-name</code></td><td><code>(Qo.Public.OqlApi.Page/child-page-by-name ParentPage Name ChildPage)</code></td></tr>
+  <tr><td><code>child-page-by-path</code></td><td><code>(Qo.Public.OqlApi.Page/child-page-by-path ParentPage Path ChildPage)</code></td></tr>
+  <tr><td><code>child-page</code></td><td><code>(Qo.Public.OqlApi.Page/child-page ParentPage ChildPage)</code></td></tr>
+  <tr><td><code>add-sub-page</code></td><td><code>(Qo.Public.OqlApi.Page/add-sub-page ParentPage PageName Result)</code></td></tr>
+  <tr><td><code>add-or-get-sub-page-by-name</code></td><td><code>(Qo.Public.OqlApi.Page/add-or-get-sub-page-by-name Parent PageName SubPage)</code></td></tr>
+  <tr><td><code>add-sub-database</code></td><td><code>(Qo.Public.OqlApi.Page/add-sub-database ParentPage PageName Result)</code></td></tr>
+  <tr><td><code>add-or-get-sub-database-by-name</code></td><td><code>(Qo.Public.OqlApi.Page/add-or-get-sub-database-by-name Parent PageName SubPage)</code></td></tr>
+  <tr><td><code>page-query</code></td><td><code>(Qo.Public.OqlApi.Page/page-query Q Page)</code></td></tr>
+  <tr><td><code>page-search</code></td><td><code>(Qo.Public.OqlApi.Page/page-search Q Page)</code></td></tr>
+  <tr><td><code>page-blocks</code></td><td><code>(Qo.Public.OqlApi.Page/page-blocks AppId PageId Blocks)</code></td></tr>
+  <tr><td><code>add-table-view</code></td><td><code>(Qo.Public.OqlApi.Page/add-table-view Page ViewName Result)</code></td></tr>
+  <tr><td><code>add-or-get-table-view</code></td><td><code>(Qo.Public.OqlApi.Page/add-or-get-table-view Page ViewName Result)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Dl</h2>
+
+<p>Polymorphic delete dispatcher. Routes to the correct delete implementation based on page type; handles page-block cleanup, parent-PageBlock cleanup, Db.Prop cleanup for row pages, and the page row delete. Single source of truth lives in <code>Qo.Dl.Page/delete-data</code>.</p>
+
+<p>Datastore: <code>omega/query-omega/public/oql-api/delete</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>delete-data</code></td><td><code>(Qo.Public.OqlApi.Dl/delete-data Page Result)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Page.Bl.LogStream</h2>
+
+<p>Log stream blocks on pages. Datastore: <code>omega/query-omega/public/oql-api/page/block/log-stream</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>add-by-name</code></td><td><code>(Qo.Public.OqlApi.Page.Bl.LogStream/add-by-name Page Name Block)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Page.Bl.PushCon</h2>
+
+<p>Push connector blocks on pages. Datastore: <code>omega/query-omega/public/oql-api/page/block/push-connector</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>add-by-name</code></td><td><code>(Qo.Public.OqlApi.Page.Bl.PushCon/add-by-name Page Name Block)</code></td></tr>
+  <tr><td><code>get-by-name</code></td><td><code>(Qo.Public.OqlApi.Page.Bl.PushCon/get-by-name Page Name PushConSpec)</code></td></tr>
+  <tr><td><code>set-data</code></td><td><code>(Qo.Public.OqlApi.Page.Bl.PushCon/set-data Page Name NewSpec Result)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Comp</h2>
+
+<p>Component definitions. Datastore: <code>omega/query-omega/public/oql-api/component</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>component</code></td><td><code>(Qo.Public.OqlApi.Comp/component AppId CompId Comp)</code></td></tr>
+  <tr><td><code>add-or-get-by-name</code></td><td><code>(Qo.Public.OqlApi.Comp/add-or-get-by-name Page Name Comp)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Proto</h2>
+
+<p>Protocol definitions. Datastore: <code>omega/query-omega/public/oql-api/protocol</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>protocol</code></td><td><code>(Qo.Public.OqlApi.Proto/protocol AppId ProtoId Proto)</code></td></tr>
+  <tr><td><code>add-or-get-by-name</code></td><td><code>(Qo.Public.OqlApi.Proto/add-or-get-by-name Page Name Spec Proto)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Impl</h2>
+
+<p>Implementation management. Datastore: <code>omega/query-omega/public/oql-api/implementation</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>set-implementation-clauses</code></td><td><code>(Qo.Public.OqlApi.Impl/set-implementation-clauses ImplId Clauses Result)</code></td></tr>
+  <tr><td><code>implementation</code></td><td><code>(Qo.Public.OqlApi.Impl/implementation AppId ImplId CompId ProtoId Impl)</code></td></tr>
+  <tr><td><code>add-or-get</code></td><td><code>(Qo.Public.OqlApi.Impl/add-or-get Page Proto Comp Name Impl)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.Db.Prop</h2>
+
+<p>Database property system — schema, primary keys, secondary indexes, table writes. Datastore: <code>omega/query-omega/public/oql-api/database/property</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>init-properties</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/init-properties Page Columns Result)</code></td></tr>
+  <tr><td><code>init-primary-key</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/init-primary-key Page PKey Result)</code></td></tr>
+  <tr><td><code>init-sec-indexes</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/init-sec-indexes Page SecIndexes Result)</code></td></tr>
+  <tr><td><code>register-sec-index</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/register-sec-index Page Column Result)</code></td></tr>
+  <tr><td><code>query-by-index</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/query-by-index Q Result)</code></td></tr>
+  <tr><td><code>write-table</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/write-table Input Result)</code></td></tr>
+  <tr><td><code>truncate-database</code></td><td><code>(Qo.Public.OqlApi.Db.Prop/truncate-database FolderId Result)</code></td></tr>
+</table>
+
+<h2>Qo.Public.OqlApi.PageSub</h2>
+
+<p>Page event subscriptions — register, emit, and query subscriptions. Datastore: <code>omega/query-omega/public/oql-api/page-subscription</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>write-page-subscription</code></td><td><code>(Qo.Public.OqlApi.PageSub/write-page-subscription Page HandlerFunc Result)</code></td></tr>
+  <tr><td><code>delete-page-subscription</code></td><td><code>(Qo.Public.OqlApi.PageSub/delete-page-subscription Page Result)</code></td></tr>
+  <tr><td><code>get-page-subscription</code></td><td><code>(Qo.Public.OqlApi.PageSub/get-page-subscription Page Result)</code></td></tr>
+  <tr><td><code>emit-page-subscription</code></td><td><code>(Qo.Public.OqlApi.PageSub/emit-page-subscription Page EventData Result)</code></td></tr>
+  <tr><td><code>page-event-handler</code></td><td><code>(Qo.Public.OqlApi.PageSub/page-event-handler ComponentPage HandlerFunc)</code></td></tr>
+  <tr><td><code>installed-page-event-handler</code></td><td><code>(Qo.Public.OqlApi.PageSub/installed-page-event-handler InstalledPage HandlerFunc)</code></td></tr>
+</table>
+
+<h2>Qo.Public.Api.Run</h2>
+
+<p>Run implementations by page reference or page ID. Datastore: <code>omega/query-omega/public/api/run</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>run-data</code></td><td><code>(Qo.Public.Api.Run/run-data Request Response)</code></td></tr>
+  <tr><td><code>run-page</code></td><td><code>(Qo.Public.Api.Run/run-page Proto Page Name Args Result)</code></td></tr>
+  <tr><td><code>run-page-by-id</code></td><td><code>(Qo.Public.Api.Run/run-page-by-id PageId ProtoName Name Args Result)</code></td></tr>
+</table>
+
+<h2>Qo.Public.Api.LogStream</h2>
+
+<p>Read log stream data. Datastore: <code>omega/query-omega/public/api/log-stream</code></p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>get-log-stream</code></td><td><code>(Qo.Public.Api.LogStream/get-log-stream Input Result)</code></td></tr>
+  <tr><td><code>read-logs</code></td><td><code>(Qo.Public.Api.LogStream/read-logs Input Result)</code></td></tr>
+</table>
+
+<h2>map-equality validation caveat</h2>
+
+<p>When you need to validate that two OQL result-key sets are the same, do <strong>not</strong> rely on direct map equality as the proof step. During MAB Critic validation work (2026-05-04), a probe comparing two small maps gave a misleading "equal" result at the point where a stricter key-set check was needed. The shipped fix avoided direct map equality and instead validated against <strong>sorted unique key lists</strong>. The underlying equality semantics for maps are <strong>Unknown</strong> — treat this as an empirical gotcha: direct map equality is unsafe for validator design.</p>

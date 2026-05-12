@@ -1,0 +1,60 @@
+<h1>Singleton-Row Term Lookup</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>Some terms hold <strong>exactly one row</strong> by design — a global config, a singleton service descriptor, a per-cluster invariant. The natural call shape for reading that row is arity-1 with the single arg as the output:</p>
+
+<pre><code>(Qo.Schema.Schema/config-data Config)</code></pre>
+
+<p>There is no input arg to constrain on, no parent id to look up by, no key to bind. This shape sits at the seam of the engine's index-matching model and currently has <strong>no clean answer</strong> in OQL.</p>
+
+<h2>What the engine does at index-match time</h2>
+
+<p>The OQL engine picks an index by inspecting which arg positions are bound at the call site, then matching that bound-arg set against the term's primary-key positions and any declared <code>write-index</code> field sets.</p>
+
+<p>For an arity-1 term where the only arg is the output:</p>
+<ul>
+  <li>Bound-arg set: <strong>empty</strong> (<code>{}</code>).</li>
+  <li>pkey field set on the defterm (if any): a non-empty list of arg names — pkey requires bound positions to compute the deterministic id.</li>
+  <li><code>write-index</code> field sets: each declares one or more arg positions; an empty bound-arg set matches none of them.</li>
+</ul>
+
+<p>The empty bound-arg set cannot construct any view-key prefix, so no view query is possible — Mango is the only fallback. That fallback fires the <code>omega/query/full-scan</code> throw.</p>
+
+<h2>Why a defterm doesn't help</h2>
+
+<p>A defterm with <code>"primary-key" []</code> is not a documented or supported declaration — it would require engine support to recognize the empty pkey as a known sentinel and route lookups through a single deterministic id. That work has not been done.</p>
+
+<p>A <code>write-index</code> also does not help: a <code>write-index</code> declares which arg positions to materialize a view over. With no bound args, every view's start-key is empty and the runtime cannot pick one over another.</p>
+
+<h2>The working answer today</h2>
+
+<p>The only way to read the row through the term today is to bookend the call with <code>(enable-full-scan)</code> / <code>(disable-full-scan)</code>. The bookend stays as a placeholder for a missing engine pattern, not as an over-binding fix that was deferred. Mark it in source with a comment pointing back to this doc so it can be retired when the engine pattern arrives.</p>
+
+<pre><code>(:- (Qo.Schema.Schema/create-config! Config)
+    (enable-full-scan)
+    (Qo.Schema.Schema/config-data Config)
+    (disable-full-scan))</code></pre>
+
+<h2>What "singleton" does and doesn't mean</h2>
+
+<p>The singleton case requires <strong>architectural cardinality 1</strong> — the term schema enforces one row by construction, and the read has no input arg available because there is no input dimension to bind.</p>
+
+<p>Do not reach for "singleton lookup" framing when:</p>
+<ul>
+  <li><strong>By-id lookup of a known row</strong> — if the caller already has the row's id, pkey, or any indexed field, bind that field and the term reads through the existing index.</li>
+  <li><strong>Per-parent singleton</strong> — a term that holds one row per parent (e.g., one config row per AppId) is a normal pkey-on-parent-id lookup — bind the parent id, hit the pkey index.</li>
+  <li><strong>Cardinality-1 by accident</strong> — a term that happens to have one row in a particular environment but is not architecturally singular has a normal index.</li>
+</ul>
+
+<h2>What a future fix would look like</h2>
+
+<p>Resolving the singleton case requires engine support — none of this is implemented today:</p>
+<ol>
+  <li><strong>Empty-pkey defterm support</strong> — allow <code>"primary-key" []</code> in a defterm declaration. The deterministic id becomes a single fixed digest. Would also need the bulk-insert path to recognize the empty pkey case.</li>
+  <li><strong>A by-singleton term call shape</strong> — a built-in like <code>(singleton-of &lt;Term&gt; Result)</code> that bypasses the index-match step entirely and reads the cardinality-1 row by a known reserved id.</li>
+  <li><strong>Migration of existing data</strong> — any term that already has a singleton-shaped row written through the legacy path has a CouchDB-assigned random id; switching to either approach above would orphan the existing row exactly the same way that adding a defterm to a populated term does.</li>
+</ol>
+
+<p>Until one of these lands, the bookend is the working answer.</p>

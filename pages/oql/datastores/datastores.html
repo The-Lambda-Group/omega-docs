@@ -1,0 +1,96 @@
+<h1>Datastores, Functors &amp; Indexes</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Datastores</h2>
+
+<p>Data in OQL lives in <strong>datastores</strong>. A datastore is a named location that holds terms (facts and rules). You declare a datastore and then use it as a namespace prefix:</p>
+
+<pre><code>(datastore Qo.Page "omega/query-omega/page")
+
+;; Query the page datastore
+(Qo.Page/page-object _ _ PageId Page)</code></pre>
+
+<p>The string <code>"omega/query-omega/page"</code> is the datastore's path in the database. The symbol <code>Qo.Page</code> is how you refer to it in the query.</p>
+
+<h2>Functors</h2>
+
+<p>A <strong>functor</strong> is a named function signature with an arity (argument count) bound to a datastore. Functors are how the engine knows where to find clauses.</p>
+
+<pre><code>;; Create a functor: name "handle-event", arity 2, in HandlerDs datastore
+(functor "handle-event" 2 HandlerDs HandlerFunc)</code></pre>
+
+<p>The resulting <code>HandlerFunc</code> is an object that points to clauses stored under the name "handle-event" with arity 2 in the <code>HandlerDs</code> datastore. You can invoke it with <code>call</code>:</p>
+
+<pre><code>(call HandlerFunc Event Result)</code></pre>
+
+<p>When you write <code>(Qo.Page/page-object _ _ PageId Page)</code>, this is syntactic sugar — the engine resolves <code>Qo.Page</code> to a datastore, creates a functor for <code>page-object</code> with arity 4, and calls it.</p>
+
+<h2>defterm</h2>
+
+<p><code>defterm</code> declares a term schema on a datastore — it defines what terms look like and which arguments are the primary key. This creates the necessary CouchDB indexes for efficient lookups.</p>
+
+<p><strong>Read <a href="defterm">defterm.html</a> before adding a defterm to a term that already has data.</strong> A defterm is <strong>not</strong> required — many terms have no defterm, and that is the normal default state. Adding one to a term with existing rows is a <strong>destructive rekey</strong>, not an additive index.</p>
+
+<pre><code>(datastore Qo.Data.LogStream "omega/query-omega/data/log-stream")
+
+(defterm Qo.Data.LogStream
+  {"name" "log-stream-data"
+   "args" ["AppId" "LogStreamId" "LogStream"]
+   "primary-key" ["LogStreamId"]})</code></pre>
+
+<p>This says: the <code>Qo.Data.LogStream</code> datastore holds terms named <code>log-stream-data</code> with 3 arguments, and <code>LogStreamId</code> (the second argument) is the primary key.</p>
+
+<p>After defining a defterm, you can read and write terms:</p>
+
+<pre><code>;; WRITE — store a term (! suffix)
+(Qo.Data.LogStream/log-stream-data! AppId LogStreamId LogStream)
+
+;; READ — query for terms
+(Qo.Data.LogStream/log-stream-data AppId LogStreamId LogStream)
+
+;; DELETE
+(Qo.Data.LogStream/delete! (log-stream-data AppId LogStreamId _))</code></pre>
+
+<h2>write-index</h2>
+
+<p>Creates a secondary index on a datastore for faster lookups by specific argument positions.</p>
+
+<pre><code>(datastore MyDs "my/datastore/path")
+(functor "my-term" 3 MyDs MyFunc)
+
+;; Create an index on the first argument (args.0)
+(write-index MyFunc "my/datastore/path/MyIndex" ["args.0"])
+
+;; Create a compound index on first and second arguments
+(write-index MyFunc "my/datastore/path/CompoundIndex" ["args.0" "args.1"])</code></pre>
+
+<p>The index path is a unique identifier for the index. The array specifies which argument positions to index. Queries that bind exactly those positions will use the index instead of scanning the full datastore.</p>
+
+<p>Adding a <code>write-index</code> is safe on a term with existing data — it adds a secondary index without rekeying any existing rows. The existing rows are read via the new view as soon as it materializes. This is the correct approach when a query throws <code>omega/query/full-scan</code> and you need an index — not adding a defterm.</p>
+
+<h2>sec-index and row-index reliability</h2>
+
+<p><code>Qo.Public.OqlApi.Db.Prop/sec-index</code> and <code>Qo.Public.OqlApi.Db.Prop/row-index</code> can return <strong>all rows</strong> in the table rather than the single matching row, regardless of whether the table has a composite PK or single-column PK. This has been empirically observed on tables with both composite and single-column keys.</p>
+
+<p>The symptom is a silent full-scan: instead of binding <code>Pid</code> to the single matching row-id, the term binds it to every row-id in the folder, and downstream reads or writes fan out across all rows.</p>
+
+<p><strong>Safe pattern:</strong> use <code>prop-vals-by-folder</code> scan + manual filter instead of relying on <code>sec-index</code> / <code>row-index</code> to return exactly one row.</p>
+
+<p>There is also a distinct failure mode with inline key literals containing symbols — see the Symbols in Literal Arguments section in the Built-ins reference. Bind the key vector first, then pass the symbol:</p>
+
+<pre><code>;; WRONG — Tid stays symbolic inside the inline list
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId [Tid] RowPageId)
+
+;; RIGHT — bind the key vector first
+(= RowKey [Tid])
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId RowKey RowPageId)</code></pre>
+
+<h2>add-or-get-by-name multi-row binding</h2>
+
+<p>Calling <code>Qo.Public.OqlApi.Page.Bl.Html/add-or-get-by-name!</code> across N per-row <code>Page</code> arguments returns the <strong>same</strong> <code>Block</code> (same <code>block-id</code>) for every row if one of them already has a block with the target name from an earlier run. Subsequent per-row writes that key on that <code>block-id</code> will collide on the page-block primary key and fail with <code>KEY_UPDATE_CONFLICT</code>.</p>
+
+<p>The root cause: the clause uses a <code>when-not</code> guard to decide whether to create a new block, but <code>when-not</code> is a universal quantifier — it checks "do any rows already have this name?" and if yes, uses the existing block for all rows.</p>
+
+<p><strong>Fix:</strong> invoke <code>add-or-get-by-name!</code> once per row via <code>run-term</code> (not <code>call</code>) to give each invocation a fresh solution scope with only that row's page in context.</p>

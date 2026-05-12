@@ -1,0 +1,207 @@
+<h1>Reducers</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>These operations work on the solution table — they aggregate, filter, or reorder rows across the solution set.</p>
+
+<pre><code>(fold Init Sym Func Agg)                  ;; reduce across solutions
+(with-count Count Term)                   ;; count solutions matching a term
+(with-order-by [Sym] Body)               ;; order solutions by symbol value
+(with-group-by [Sym] Body)               ;; group solutions by symbol value
+(with-unique-by [Sym] Body)              ;; deduplicate solutions by symbol value
+(with-limit N Body)                       ;; limit to first N solutions
+(with-skip N Body)                        ;; skip first N solutions
+(with-sort Dir Body)                      ;; sort direction: "asc" or "desc"</code></pre>
+
+<h2>fold</h2>
+
+<p>Reduces a symbol across all solutions in the table. The function is applied pairwise (like <code>reduce</code> in functional programming):</p>
+
+<pre><code>;; Collect all names into an array
+(get Items _ Item)
+(get Item "name" Name)
+(fold [] Name append Names)              ;; Names = ["Alice", "Bob", "Carol"]
+
+;; Sum a numeric value
+(get Items _ Item)
+(get Item "score" Score)
+(fold 0 Score + Total)                   ;; Total = sum of all scores</code></pre>
+
+<p><code>fold</code> takes four arguments: <strong>Init</strong> (initial accumulator), <strong>Sym</strong> (symbol to reduce over), <strong>Func</strong> (reducer function), <strong>Agg</strong> (output symbol).</p>
+
+<p><strong>Reducer functions are language primitives, not first-class values.</strong> <code>append</code>, <code>prepend</code>, <code>+</code>, <code>*</code>, and any other reducer are literal terms in the OQL grammar — they cannot be stored in a symbol. Writing <code>(= Reducer "append") (fold [] Item Reducer List)</code> does not work. If runtime logic determines which reducer to use, write two fully explicit branches selected with <code>with-table-if</code>.</p>
+
+<h2>fold pitfalls</h2>
+
+<h3>fold is solution-wide, not per-row</h3>
+
+<p><code>fold</code> is a solution-wide aggregation — think SQL <code>GROUP BY</code> the whole table. When you write <code>(fold [] P append Fields)</code> inside a <code>with-table-if</code> branch to build one array per row, at batch=1 it works by accident. At batch&gt;1, every row gets the same merged array containing ALL rows' values.</p>
+
+<p><strong>The fix — use <code>append</code> for per-row accumulation:</strong></p>
+
+<pre><code>;; BAD — fold builds ONE shared array across all rows
+(with-table-if [ContactId FieldPair] (defined FieldPair)
+  (fold [] FieldPair append Fields))
+;; batch=2 -&gt; Fields = [pair-A pair-B] (both contacts get BOTH pairs)
+
+;; GOOD — append builds one array per row
+(with-table-if [ContactId FieldPair] (defined FieldPair)
+  (append Fields FieldPair Fields1))</code></pre>
+
+<table>
+  <tr><th>Operation</th><th>Scope</th><th>Use for</th></tr>
+  <tr><td><code>fold</code></td><td>solution-wide</td><td>totals, counts, collecting all distinct values into one result</td></tr>
+  <tr><td><code>append</code></td><td>per-row</td><td>building an array that belongs to each row independently</td></tr>
+</table>
+
+<h3>fold folds over unique values, not rows</h3>
+
+<p>If <code>X</code> is a column whose values are <code>0</code> or <code>1</code>, <code>fold</code> sees two unique values and returns a sum of 1, regardless of how many rows had <code>X = 1</code>. Use <code>with-unique-by</code> to make fold see one value per unique row key:</p>
+
+<pre><code>;; BAD — Sum maxes at 1 even if 500 rows have NeedsCreate
+(fold 0 NeedsCreate + Sum)
+
+;; GOOD — Sum = count of rows
+(with-unique-by [RowId]
+  (fold 0 NeedsCreate + Sum))</code></pre>
+
+<p>Or count rows directly with a literal <code>1</code>:</p>
+<pre><code>(with-table-if [RowId NeedsCreate] (= NeedsCreate "true")
+  (fold 0 1 + Count))</code></pre>
+
+<h3>fold over zero solutions does not bind its accumulator</h3>
+
+<p><code>fold</code> does <strong>not</strong> bind its accumulator to the <code>Init</code> value when the upstream has zero solutions. If the upstream has zero solutions, <code>fold</code> produces zero rows — the <code>Agg</code> symbol is left unbound.</p>
+
+<pre><code>;; If no pages match, AllPids is unbound — downstream (return [AllPids]) fails
+(Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" Pid)
+(fold [] Pid append AllPids)
+(return [AllPids])</code></pre>
+
+<h4>The canonical fold-with-default idiom</h4>
+
+<pre><code>(with-count Cnt (Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" _))
+(with-table-if (&gt; Cnt 0)
+  [FolderId AllPids]
+  (and (Qo.Public.OqlApi.Db.Prop/sec-index FolderId "agent" "researcher" Pid)
+       (fold [] Pid append AllPids))
+  (= AllPids []))
+;; AllPids is now bound on every downstream row, regardless of cardinality.</code></pre>
+
+<p>Why this works: <code>with-count</code> always produces exactly one solution — even when the inner term matches nothing — and binds <code>Cnt</code> to 0 in the empty case.</p>
+
+<h3>Counting rows in a captured-helper body when with-count is unavailable</h3>
+
+<p>When <code>with-count</code> is unavailable (compound predicate, sec-index trailing wildcard, or a captured helper containing <code>prop-vals-by-folder</code>), use the <strong>fold-append-per-row-unique-symbol</strong> pattern:</p>
+
+<pre><code>(:- (CountRowsMatchingPredicate ScanArgs FilterArgs Count)
+    (with-table-if (and (&lt;scan term producing per-row symbols&gt;)
+                        (&lt;filter terms&gt;))
+      [&lt;header symbols including PerRowUniqueSymbol and RowList&gt;]
+      (fold [] PerRowUniqueSymbol append RowList)
+      (= RowList []))
+    (length RowList Count))</code></pre>
+
+<p>The load-bearing detail: fold must be over a <em>per-row-unique</em> symbol. In a CouchDB-backed <code>prop-vals-by-folder</code> scan, the page-id (<code>Pid</code>) is reliable because each CouchDB document has a unique <code>_id</code>.</p>
+
+<h3>Counting source-array length vs fold-accumulator length</h3>
+
+<p>Any "are there duplicates in this array?" check must measure the source array's length, not a folded view of it. A uniqueness-validation check that compares post-fold lengths will always report "no duplicates" — both arrays are already deduplicated.</p>
+
+<pre><code>;; RIGHT — measure the input array
+(get Drafts _ Draft)
+(get Draft "treatment_id" Tid)
+(fold [] PairKey append AllKeys)
+(length Drafts Total)                ;; measure the input array
+(call IntoSet AllKeys UniqueSet)
+(fold [] UKey append UniqueKeys)     ;; in IntoSet, fold over unique set keys
+(length UniqueKeys UniqueCount)
+(with-table-if (= UniqueCount Total) [...] ok throw-duplicate-keys)</code></pre>
+
+<h3>Why batch=1 masks fold bugs</h3>
+
+<p>With one row in the solution, "all rows" and "this row" are the same set. Both fold pitfalls only surface when the batch contains two or more rows.</p>
+
+<h2>with-unique-by</h2>
+
+<p><code>with-unique-by</code> changes what "unique" means for folds inside its body. Instead of deduplicating by the fold symbol, it deduplicates by the specified symbol(s):</p>
+
+<pre><code>;; Problem: ApiCall is 0 or 1 per row. Without with-unique-by,
+;; fold sees at most 2 unique values.
+(fold 0 ApiCall + ApiCount)              ;; BUG: always 0 or 1
+
+;; Solution: unique-by AgentLink means fold sees one ApiCall per agent
+(with-unique-by [AgentLink]
+  (fold 0 ApiCall + ApiCount))           ;; CORRECT: sums per agent</code></pre>
+
+<h2>with-order-by</h2>
+
+<p>Sorts solutions before folding or returning. <code>with-order-by</code> <strong>always sorts ascending</strong> — there is no direction parameter.</p>
+
+<pre><code>(with-order-by [Score]
+  (fold [] Name append SortedNames))</code></pre>
+
+<h3>Producing a descending-sorted list</h3>
+
+<p>Sort ascending with <code>with-order-by [Key]</code>, then fold with <strong><code>prepend</code></strong> instead of <code>append</code>:</p>
+
+<pre><code>;; Descending — highest Score first
+(with-order-by [Score]
+  (fold [] Name prepend DescNames))</code></pre>
+
+<p>Empirically verified: <code>DescNames</code> is the exact reverse of an ascending fold.</p>
+
+<h2>with-group-by</h2>
+
+<p>Partitions solutions into groups. Inside the body, <code>fold</code> operates per-group:</p>
+
+<pre><code>(with-group-by [Department]
+  (fold 0 Salary + DeptTotal))</code></pre>
+
+<h2>with-count</h2>
+
+<p>Counts solutions matching a term. Always produces exactly one solution row — including <code>0</code> when the term matches nothing. This makes it the building block for empty-handling around <code>fold</code>.</p>
+
+<pre><code>(with-count Total (Qo.Db.Prop/prop-vals FolderId _ _))  ;; Total = row count</code></pre>
+
+<p><strong>All-wildcard form currently NPEs.</strong> Passing all wildcards to count every row in a defterm — <code>(with-count Cnt (Qo.Namespace/term _ _ _ _))</code> — currently fails with <code>omega/jvm/NullPointerException</code>. For a total row count, use <code>omega-cli db-name</code> + <code>curl GET /&lt;db&gt;/</code> to read <code>doc_count</code>.</p>
+
+<p><strong>Restrict the inner term to a single call.</strong> <code>with-count</code> over a compound condition — <code>(with-count Cnt (and Term1 Term2))</code> — currently fails with a NullPointerException. Wrap the compound logic in an in-memory clause and count over the clause invocation instead.</p>
+
+<p><strong>Three known NPE patterns:</strong></p>
+<ul>
+  <li>sec-index with trailing wildcard</li>
+  <li>compound <code>(and ...)</code> predicate</li>
+  <li>captured helper containing <code>prop-vals-by-folder</code></li>
+</ul>
+
+<p>For any of these, use the fold-append-per-row-unique-symbol + length pattern documented above.</p>
+
+<h2>Performance: partitions and run-term</h2>
+
+<p><code>fold</code> / <code>with-group-by</code> / <code>with-order-by</code> scale poorly when the solution table contains many distinct group-key values. The idiomatic workaround is to <strong>establish the partition boundary before folding</strong>: wrap the reducer body in a clause and invoke it once per key via <code>run-term</code>.</p>
+
+<p>Measured: 8.3s with a top-level <code>with-group-by [PageId]</code>, 0.5s when the same reducer body was called via <code>run-term</code> per page (21-page pull, 2026-04-24).</p>
+
+<p>There are two valid <code>run-term</code> shapes for captured in-memory helpers:</p>
+<ol>
+  <li><strong>Partition-before-fold</strong> — replace <code>with-group-by</code> with a per-partition <code>run-term</code> invocation.</li>
+  <li><strong>Per-row iteration at scale</strong> — invoke a helper once per row in a multi-row solution table where K ≥ ~30 rows.</li>
+</ol>
+
+<p>Outside these two shapes — for standard one-solution-in / one-solution-out helpers — use <code>call</code>. <code>run-term</code> against a captured in-memory helper in any other context produces a 500 or engine spin-out / <code>ECONNRESET</code>.</p>
+
+<h2>with-limit / with-skip / with-sort</h2>
+
+<p><code>with-limit</code> limits the number of solutions returned. <code>with-skip</code> skips the first N results. Both thread their parameters into CouchDB view queries and <strong>only</strong> work when the runtime resolves the term through a view index — see the Query Execution doc for the full strategy table. <code>with-sort</code> controls sort direction; <code>"desc"</code> sets <code>descending: true</code> on the CouchDB view request.</p>
+
+<pre><code>;; Pagination: skip 20, take 10
+(with-skip 20
+  (with-limit 10
+    (Qo.Db.Prop/prop-vals FolderId PageId PropName PropVal)))
+
+;; Descending with limit
+(with-sort "desc"
+  (with-limit 5
+    (Qo.Db.Prop/prop-vals FolderId PageId PropVal)))</code></pre>

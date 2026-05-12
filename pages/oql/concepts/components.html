@@ -1,0 +1,106 @@
+<h1>Components, Protocols &amp; Plugins</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Components, Protocols, and Implementations</h2>
+
+<p>Omega's code model has three parts: <strong>components</strong>, <strong>protocols</strong>, and <strong>implementations</strong>. Together they define what a page can do and how it does it.</p>
+
+<h3>Protocols</h3>
+
+<p>A protocol is an interface definition. It declares a set of methods with names and arities (argument counts). Protocols don't contain any code — they just describe what methods exist.</p>
+
+<pre><code>{
+  "functions": [
+    { "name": "install", "args": ["self"] },
+    { "name": "start",   "args": ["self"] },
+    { "name": "stop",    "args": ["self"] },
+    { "name": "status",  "args": ["self"] }
+  ]
+}</code></pre>
+
+<p>Protocols are the interfaces; components are the types; implementations are the code. See <a href="../api/protocols">Protocols reference</a> for the full list of standard protocols.</p>
+
+<h3>Components</h3>
+
+<p>A component is a type definition. It says "this page is capable of implementing these protocols." A component can implement multiple protocols.</p>
+
+<h3>Implementations</h3>
+
+<p>An implementation is the actual OQL code that fulfills a protocol's methods for a specific component. Each method is an OQL clause that takes <code>Exec</code> and <code>Result</code> as its two arguments:</p>
+
+<pre><code>(:- (MyInstall Exec Result)
+    ;; set up pages, databases, subscriptions
+    (= Result {"status" "ok"}))</code></pre>
+
+<p>Implementations are registered via <code>set-implementation-clauses</code>. The call maps method names to OQL clause symbols:</p>
+
+<pre><code>(Qo.Public.OqlApi.Impl/set-implementation-clauses
+  "$$ARG$$"
+  {"install" MyInstall
+   "start"   MyStart
+   "stop"    MyStop}
+  _)</code></pre>
+
+<h2>Plugins</h2>
+
+<p>A plugin is an installable component that creates its own page tree in your workspace. Think of it like <code>apt-get install</code> — you install a plugin, it sets up everything it needs, and you operate it with standard tools.</p>
+
+<h3>What a plugin creates when installed</h3>
+
+<pre><code>Component Installs/
+  Payments Connector/               &lt;- the plugin's root page
+    Payments Event Listener/        &lt;- event handler + log stream
+    Payment Events/                 &lt;- source data table (raw webhook events)
+    Events/
+      Coordinator/                  &lt;- routes events between steps
+      Parse Events/                 &lt;- event parsing logic
+      Reconcile Balances/           &lt;- reconciliation logic
+      Report Deltas/                &lt;- reporting logic</code></pre>
+
+<p>The <code>install</code> method of the Installable protocol is responsible for creating this structure. A well-written install method creates the page tree, initializes databases, registers subscriptions, and sets up push connectors — all in a single idempotent pass.</p>
+
+<h3>Idempotent install</h3>
+
+<p>Install methods should be idempotent — running install twice should produce the same result as running it once. Use <code>add-or-get-*</code> API clauses rather than <code>add-*</code> to achieve this:</p>
+
+<pre><code>;; Idempotent page creation
+(Qo.Public.OqlApi.Page/add-or-get-sub-page-by-name ParentPage "Events" EventsPage)
+
+;; Idempotent database creation
+(Qo.Public.OqlApi.Page/add-or-get-sub-database-by-name ParentPage "Treatments" TreatmentsDb)</code></pre>
+
+<h2>The page tree convention for workflow components</h2>
+
+<p>Workflow components follow a standard page tree convention:</p>
+
+<pre><code>My App/                                  &lt;- root: Installable + Service
+  My App Event Listener/                 &lt;- Event Handler block
+  Events/
+    Coordinator/                         &lt;- Event Handler: routes to steps
+    Step A/                              &lt;- Event Handler: one step
+    Step B/                              &lt;- Event Handler: another step
+  Data/
+    Step A Results/                      &lt;- database table
+    Step B Results/                      &lt;- database table</code></pre>
+
+<p>The Coordinator's <code>on-event</code> method receives events from the Event Listener and routes them to the appropriate step via <code>run-page</code>. Each step's <code>on-event</code> method does the actual work and writes results to the Data table.</p>
+
+<h2>Event subscriptions and handlers</h2>
+
+<p>When an event subscription handler fires, it creates a <strong>fresh context</strong> — it does NOT inherit any state from the original emitter. The handler functor must be fully self-contained.</p>
+
+<p>You cannot pass runtime state through subscriptions — only through the event data payload. Design your event payloads to include everything the handler needs to do its work.</p>
+
+<h2>Run clauses</h2>
+
+<p>The Query protocol's <code>run</code> method enables stateless query execution. <code>run-page</code> and <code>run-page-by-id</code> invoke a page's <code>run</code> method:</p>
+
+<pre><code>;; Run by page reference
+(Qo.Public.Api.Run/run-page Proto Page Name Args Result)
+
+;; Run by page ID
+(Qo.Public.Api.Run/run-page-by-id PageId ProtoName Name Args Result)</code></pre>
+
+<p>Use <code>run-page-by-id</code> when you have the page ID cached (faster — avoids a page lookup). Use <code>run-page</code> when you only have the page object.</p>

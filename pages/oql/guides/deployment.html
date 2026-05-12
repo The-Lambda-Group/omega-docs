@@ -1,0 +1,75 @@
+<h1>Deployment</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Library-side vs installed-side</h2>
+
+<p>Every component exists in two places in the workspace:</p>
+
+<ul>
+  <li><strong>Library-side (dev) component</strong> — the component in your developer library. <code>qo push [impl-file]</code> updates this one. The impl file's embedded <code>set-implementation-clauses</code> script calls the engine with <code>$$ARG$$</code> as the impl-id; at push time <code>$$ARG$$</code> resolves to the library-side impl-id.</li>
+  <li><strong>Installed component</strong> — a separate copy of the component installed into a specific workspace location (e.g. a MAB Agent System page). It has its own component-id and its own impl-id. <code>qo push</code> does <strong>not</strong> touch the installed component.</li>
+</ul>
+
+<p>If you push a fix and the running workflow continues to exhibit the old behavior, you have fixed the library side only. The installed component is still running the old clauses.</p>
+
+<h2>Deploying a fix to a running installed component</h2>
+
+<ol>
+  <li>Push the updated impl file: <code>qo push [impl-file]</code>. This updates the library-side clauses.</li>
+  <li>Identify the installed component's impl page (e.g., <code>"Component Installs/My App/Implementation"</code>).</li>
+  <li>Run the targeted deploy against the installed component's impl page to update it with the new clauses. The exact command depends on the deployment protocol your component uses.</li>
+</ol>
+
+<p>The two steps are always separate. Never assume a library-side push has updated a running installed component.</p>
+
+<h2>Test at realistic batch sizes</h2>
+
+<p><strong>Always test at realistic batch sizes before declaring working.</strong> If your pipeline runs at 100 rows per batch, test at 100 — not at 1.</p>
+
+<p>Why this matters — several OQL constructs have behavior that depends on row count. A query that works at <code>limit=1</code> can fail at <code>limit=100</code>:</p>
+
+<ul>
+  <li><strong><code>with-table-if</code> schema collapse</strong> only bites when rows share schema values. At <code>limit=1</code> the collapse is invisible.</li>
+  <li><strong>fold cross-row merge</strong> — a fold that returns the correct single row at batch=1 returns a merged all-rows array at batch&gt;1.</li>
+  <li><strong>Cardinality multipliers</strong> from captured helpers are invisible at batch=1 but produce exponential blowup at scale.</li>
+  <li><strong><code>call</code> vs <code>run-term</code> in per-row iteration</strong> — <code>call</code> hangs at K~40 rows in a multi-solution iteration; the hang only surfaces when you test at realistic scale.</li>
+</ul>
+
+<p>The discipline: run at least one batch at the expected production batch size before merging. The "it works at limit=1" report is not a signal of correctness — it's a signal that you haven't tested the constructs that only fail at scale.</p>
+
+<h2>Verify Thompson-sampling allocation steps</h2>
+
+<p>A cargo-cult-able verification pattern for any OQL code step that runs Thompson sampling to distribute a budget across arms. Covers four invariants: variance is real (sampling is not deterministic), no arm starvation, budget tracking is correct, and selection pressure flows from prior strength.</p>
+
+<p><strong>The pattern: N-firing drop-between distribution sanity</strong></p>
+
+<p>Run the step multiple times against a clean slate, record per-arm counts, then check the four invariants:</p>
+
+<ol>
+  <li><strong>Variance is real.</strong> Run the step N times (e.g., 10). If every run produces the same per-arm allocation, sampling is deterministic — something is wrong. The allocations should vary across runs.</li>
+  <li><strong>No arm starvation.</strong> Over N runs, every arm should receive at least one allocation. An arm that never receives an allocation despite having a non-zero prior suggests the prior is being computed incorrectly or the arm is being dropped before sampling.</li>
+  <li><strong>Budget tracking is correct.</strong> The sum of all per-arm allocations across all runs should equal N × total-budget. No budget should be lost or double-counted.</li>
+  <li><strong>Selection pressure flows from prior strength.</strong> Arms with stronger priors (higher alpha, lower beta) should receive proportionally more allocations over N runs. Compute the per-arm fraction and verify it correlates with prior strength.</li>
+</ol>
+
+<p>If any invariant fails, the allocation logic is incorrect. Use debug-by-returning-early to inspect the intermediate state at each step.</p>
+
+<h2>Calling OQL from Clojure</h2>
+
+<p>When you invoke OQL from Clojure (rather than via the CLI, MCP, or HTTP API), the entry point is <code>omega-db.run/run-query-clj</code>. It returns a <strong>two-element vector</strong> <code>[result ctx]</code>:</p>
+
+<ul>
+  <li><code>result</code> — whatever the last term produced.</li>
+  <li><code>ctx</code> — the query context after evaluation, including the solution table and accumulated <code>:failed-at</code> frames.</li>
+</ul>
+
+<p><strong>Gotcha: <code>(some? (run/run-query-clj q))</code> is always true.</strong> The return value is a vector, and a non-empty vector is non-nil — even when the query produced zero solutions, threw a caught error, or wrote nothing. Always destructure and assert on what the query is supposed to produce:</p>
+
+<pre><code>;; WRONG — this passes even when the query is a no-op or fails internally
+(is (some? (run/run-query-clj '((MyDs/init)))))
+
+;; BEST — destructure and assert on the query's expected output
+(let [[result _ctx] (run/run-query-clj '((MyDs/get-thing "id" Thing) (return [Thing])))]
+  (is (= expected-thing result)))</code></pre>

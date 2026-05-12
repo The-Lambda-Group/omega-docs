@@ -1,0 +1,18 @@
+<h1>OQL Language Reference</h1>
+
+<p>Core language constructs for writing OQL. These docs cover what the language provides and how it behaves — the authoritative reference for clause definition, control flow primitives, built-in terms, solution reducers, query execution strategies, and the hard rules that exist because every one of them has produced real data loss or silent wrong-answer bugs in production.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="clauses">Clauses</a> — Stored clauses, in-memory clauses, the clause term syntax, inner clauses, closures and capture semantics (including non-transitivity, per-clause scope, fold in clause bodies), and the five hard rules that must never be violated.</li>
+  <li><a href="control-flow">Control Flow</a> — when/when-not/if universal quantifiers, with-table-if per-solution branching, schema binding rules, row-identity preservation, the drop idiom, and the not-operator absence.</li>
+  <li><a href="built-ins">Built-in Terms</a> — Core terms, arithmetic, map operations, array operations, string operations, HTTP, symbols-in-literal-arguments rule, and deprecated http-get/post/delete terms.</li>
+  <li><a href="reducers">Reducers</a> — fold, with-unique-by, with-order-by, with-group-by, with-count, with-limit, with-skip, with-sort, and all fold pitfall patterns.</li>
+  <li><a href="query-execution">Query Execution</a> — Index selection strategies (defterm PK, write-index exact/prefix, Mango fallback), operator push-down per strategy, and the Mango silent-ignore gotcha for with-skip/with-limit.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>Datastore declaration syntax, defterm semantics, and functor creation live in <a href="../datastores">Datastores &amp; Storage</a>. Public API clauses live in <a href="../api">Public API</a>.</p>

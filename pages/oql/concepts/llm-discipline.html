@@ -1,0 +1,79 @@
+<h1>LLM Output Discipline</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>When an LLM-driven agent step pipes a model response into OQL — typically through <code>(json-stringify Parsed RawText)</code> to land structured data into the solution set — the response sometimes won't parse. The reflexive instinct is to add a <code>string-replace</code> or regex-clean pass before the <code>json-stringify</code> call, normalising the malformed bytes into something the parser will accept.</p>
+
+<p><strong>Don't.</strong></p>
+
+<h2>The rule</h2>
+
+<p>If an LLM response can't be parsed by OQL's <code>json-stringify</code>:</p>
+
+<ol>
+  <li><strong>Do not</strong> insert a pre-parse cleaning step (<code>string-replace</code>, regex normalisation, character stripping, etc.) into the implementation.</li>
+  <li><strong>Do</strong> fix the producer — tighten the LLM prompt so the model emits parser-clean output the first time.</li>
+  <li><strong>Or</strong> file a parser-bug gap if the producer can't reasonably be tightened, and stop. Don't ship a workaround in the meantime.</li>
+</ol>
+
+<p>Two acceptable moves, both at the boundary that owns the data shape. No scrubbing layer in between.</p>
+
+<h2>Why string-scrubbing is the wrong response</h2>
+
+<p>A scrubbing layer at the consumption boundary:</p>
+
+<ul>
+  <li><strong>Hides the real failure.</strong> If the LLM is emitting malformed output, the scrubber masks the signal. The next version of the prompt, the next LLM, or the next deployment removes the scrubber and the failure returns — but now it's harder to diagnose because it was hidden for so long.</li>
+  <li><strong>Silently corrupts data.</strong> A <code>string-replace</code> that removes a character the parser rejects might also remove that character from legitimate content — stripping a Unicode character from an LLM response that legitimately contained it, for example. The scrubber is a lossy transform applied without semantic understanding of the content.</li>
+  <li><strong>Creates a maintenance liability.</strong> The scrubber needs to handle every future variant of the failure. As the LLM changes and the prompt evolves, the scrubber becomes an accumulating layer of special cases with no clear exit.</li>
+  <li><strong>Is technically incorrect.</strong> The LLM is the producer. The producer owns the shape of its output. Normalizing at the consumer boundary is a violation of the producer/consumer contract — it says "I accept any output and will make it work," which removes the incentive for the producer to emit correct output.</li>
+</ul>
+
+<h2>What json-stringify parse direction is strict about</h2>
+
+<p><code>json-stringify</code> parse direction (first arg unbound, second arg bound) rejects raw control characters — ASCII 0–31 other than space (<code>0x20</code>), newline (<code>0x0A</code>), and tab (<code>0x09</code>) — that are illegal in JSON per RFC 8259. An LLM response that contains these characters as raw bytes in a string value is technically invalid JSON, and <code>json-stringify</code> correctly rejects it.</p>
+
+<p>The error message is:</p>
+<pre><code>omega/jvm/Exception: JSON error (missing entry in object)</code></pre>
+
+<p>or:</p>
+<pre><code>omega/jvm/Exception: JSON error (unexpected character)</code></pre>
+
+<p>This is not a parser bug. The parser is correct. The JSON is invalid.</p>
+
+<h2>LLM response truncation</h2>
+
+<p>A <code>call-llm</code> invocation fails with:</p>
+<pre><code>omega/jvm/EOFException: JSON error (end-of-file inside string)</code></pre>
+
+<p>This looks like a JSON parse bug. It is not. The LLM emitted a response that was cut off mid-string (before the closing braces and quotes that would make the payload valid JSON), so <code>json-stringify</code> runs out of input while still inside an open string and throws <code>EOFException</code>. Wall-clock to the throw is typically 30s-2min — long enough that the LLM was clearly generating output, not failing fast on input.</p>
+
+<p><strong>The cause is always prompt design or token limit:</strong></p>
+<ul>
+  <li>The LLM was asked to produce a JSON payload that exceeds the model's output token limit.</li>
+  <li>The prompt didn't instruct the model to keep responses concise.</li>
+  <li>The model was generating verbose reasoning or preamble before the JSON, consuming tokens that should have gone to the JSON payload.</li>
+</ul>
+
+<p><strong>The fix is always at the prompt:</strong></p>
+<ul>
+  <li>Add an explicit instruction to return only the JSON object, no preamble or explanation.</li>
+  <li>Reduce the expected output size (fewer fields, shorter values, paginated output).</li>
+  <li>Increase the model's output token limit if available.</li>
+</ul>
+
+<p>Do not add retry logic or partial-parse recovery at the consumption layer. The problem is the producer, not the consumer.</p>
+
+<h2>When to file a parser-bug gap</h2>
+
+<p>If you have tightened the prompt as much as is reasonably possible and the LLM still emits output that <code>json-stringify</code> rejects — and you have evidence that the output is technically valid JSON that the parser should accept — file a gap. Describe:</p>
+
+<ul>
+  <li>The exact JSON that was rejected (or a minimal repro).</li>
+  <li>The exact error message.</li>
+  <li>Evidence that the JSON is technically valid (e.g., it parses in other JSON parsers).</li>
+  <li>Why prompt-tightening is not sufficient to address the failure.</li>
+</ul>
+
+<p>Stop at the gap. Do not ship a scrubber while the gap is open.</p>

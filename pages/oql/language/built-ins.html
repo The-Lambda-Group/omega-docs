@@ -1,0 +1,236 @@
+<h1>Built-in Terms</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Primitives that look like they should exist but don't</h2>
+
+<p>OQL's built-in inventory is smaller than Clojure's or Common Lisp's. Several primitives that agents reach for by training default are not implemented.</p>
+
+<table>
+  <tr><th>Name agents reach for</th><th>Status</th><th>Canonical workaround</th></tr>
+  <tr><td><code>string-length</code></td><td>Does not exist.</td><td>No primitive returns string length. Inspect a string by binding it directly into Result and letting the caller read it.</td></tr>
+  <tr><td><code>string-take</code> / <code>string-substr</code> / <code>substring</code></td><td>None exist.</td><td>The string toolkit is exactly: <code>string-split</code>, <code>string-concat</code> (binary), <code>string-contains</code>, <code>string-replace</code>, <code>re-find</code>, <code>json-stringify</code>. Slicing by index is not supported.</td></tr>
+  <tr><td><code>keys</code></td><td>Does not exist.</td><td>Use the K-binding-then-fold idiom: <code>(get Map K _) (fold [] K append KeysList)</code>.</td></tr>
+  <tr><td><code>assoc</code> (as a fold reducer)</td><td>Does not exist.</td><td>When folding into a map, use <code>append</code> with key-value pair entries: <code>(= Entry [El El]) (fold {} Entry append Set)</code>.</td></tr>
+</table>
+
+<h2>Core</h2>
+
+<pre><code>(= X 5)                              ;; unify X with 5
+(defined X)                          ;; check if symbol is bound
+(return [Result])                     ;; return from a query
+(uuid Id)                             ;; generate UUID
+(time-now Timestamp)                  ;; current ISO timestamp
+(throw "TAG" DataMap)                 ;; raise a typed OQL exception</code></pre>
+
+<h3>throw — raising a typed exception</h3>
+
+<p><strong>Signature:</strong> <code>(throw Tag DataMap)</code> — exactly two arguments, both required.</p>
+
+<table>
+  <tr><th>Arg</th><th>Direction</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>Tag</code></td><td>input</td><td>string literal</td><td>Identifies the error type. Must be a string literal, not a variable.</td></tr>
+  <tr><td><code>DataMap</code></td><td>input</td><td>map</td><td>Carries error context. <strong>Must be a pre-bound symbol</strong> — never a map literal written inline at the call site.</td></tr>
+</table>
+
+<pre><code>;; WRONG — throws at runtime with a cryptic error
+(throw "CAMPAIGN_NOT_FOUND" {"campaign-id" CampaignId "status" Status})
+
+;; RIGHT — bind the map first, then pass the symbol
+(= ErrData {"campaign-id" CampaignId "status" Status})
+(throw "CAMPAIGN_NOT_FOUND" ErrData)</code></pre>
+
+<h2>Arithmetic</h2>
+
+<pre><code>(+ 1 2 Sum)                          ;; addition
+(- 6 1 Diff)                         ;; subtraction
+(* 3 4 Product)                      ;; multiplication
+(/ 10 2 Quotient)                    ;; division
+(&gt; A B)                              ;; greater than (succeeds or fails)
+(&lt; A B)                              ;; less than
+(&gt;= A B)                             ;; greater than or equal</code></pre>
+
+<h3>rand — random double</h3>
+
+<pre><code>(rand Output)                        ;; uniformly random double in [0.0, 1.0)</code></pre>
+
+<p>Range: <code>[0.0, 1.0)</code>. Output type: double. Not seedable, not cryptographic, never throws. In a multi-solution query, each solution gets its own independent call to <code>rand</code>.</p>
+
+<h3>rand-int — random integer in a range</h3>
+
+<pre><code>(rand-int Min Max Output)            ;; uniformly random integer in [Min, Max)</code></pre>
+
+<p><code>rand-int</code> validates its inputs and throws a typed OQL exception on violations:</p>
+<table>
+  <tr><th>Condition</th><th>Exception type</th></tr>
+  <tr><td><code>Min</code> or <code>Max</code> is unbound</td><td><code>RAND_INT_UNBOUND_ARG</code></td></tr>
+  <tr><td><code>Min</code> or <code>Max</code> is not an integer</td><td><code>RAND_INT_NON_INTEGER</code></td></tr>
+  <tr><td><code>Min &gt;= Max</code></td><td><code>RAND_INT_BAD_RANGE</code></td></tr>
+</table>
+
+<h2>Map Operations</h2>
+
+<pre><code>(get Map "key" Value)                 ;; read a key (unifies Value)
+(get-in Map ["a" "b"] Value)          ;; nested read (unifies Value)
+(set Map "key" NewVal Result)         ;; set a key (returns new map)
+(merge Map1 Map2 Result)             ;; merge two maps (Map2 wins on conflict)
+(select-keys Map ["k1" "k2"] Result) ;; return new map with only the listed keys
+(zip Keys Values Map)                ;; create a map from parallel key/value arrays</code></pre>
+
+<p><strong><code>merge</code></strong>: when both maps have the same key, Map2's value wins.</p>
+
+<p><strong><code>zip</code></strong> creates a map from two parallel arrays and also works in reverse — given keys and a map, extracts the values:</p>
+<pre><code>;; Forward: keys + values -> map
+(zip ["name" "age"] ["Alice" 30] Result)   ;; Result = {"name" "Alice" "age" 30}
+
+;; Reverse: keys + map -> values
+(zip ["name" "age"] Values {"name" "Alice" "age" 30 "city" "NYC"})
+;; Values = ["Alice" 30]</code></pre>
+
+<h2>Array / List Operations</h2>
+
+<pre><code>(get-list Map ["k1" "k2" "k3"] Values)   ;; extract values for keys as an array
+(length Array Len)                         ;; array length
+(append Array Item Result)                 ;; append item to array
+(concat Array1 Array2 Result)              ;; concatenate two arrays
+(partition Array N Chunks)                 ;; split array into chunks of size N</code></pre>
+
+<h2>String Operations</h2>
+
+<pre><code>(string-split Path "/" Segments)          ;; split string
+(string-concat "Hello " Name Greeting)   ;; concatenate strings (strictly binary)
+(string-contains Str "sub" Result)        ;; check substring
+(string-replace Str "," "" Clean)         ;; replace substring
+(re-find Str "\\d+" Match)               ;; regex find
+(json-stringify Obj Str)                  ;; JSON: object &lt;-&gt; string (bidirectional)</code></pre>
+
+<p><strong><code>string-concat</code> is binary, not variadic.</strong> It always takes exactly two input strings and an output. To concatenate three or more strings, chain calls:</p>
+<pre><code>(string-concat "https://api.example.com/contacts/?locationId=" LocationId Url0)
+(string-concat Url0 "&amp;limit=100" Url)</code></pre>
+
+<h3>json-stringify is bidirectional — there is no json-parse</h3>
+
+<p>Direction is determined by which argument is bound:</p>
+
+<ul>
+  <li><strong>Stringify (object to string):</strong> bind the first arg, leave the second unbound.</li>
+  <li><strong>Parse (string to object):</strong> leave the first arg unbound, bind the second.</li>
+</ul>
+
+<pre><code>;; Stringify
+(= Data {"name" "Alice" "age" 30})
+(json-stringify Data JsonStr)
+
+;; Parse
+(get Res "body" RawBody)
+(json-stringify Parsed RawBody)   ;; Parsed is now a map you can (get ...) into</code></pre>
+
+<p>Calling <code>(json-parse Body Result)</code> produces a 500 with no hint that you need <code>json-stringify</code> with reversed binding.</p>
+
+<p><strong>Probing validity: use a named symbol, not <code>_</code>.</strong> <code>(json-stringify _ Text)</code> always fails. Use a named symbol instead:</p>
+<pre><code>;; WRONG — always fails
+(when-not (json-stringify _ Text)
+  (throw "PARSE_ERROR" ParseErr))
+
+;; RIGHT
+(when-not (json-stringify ParseProbe Text)
+  (throw "PARSE_ERROR" ParseErr))</code></pre>
+
+<p><strong>json-stringify parse direction is strict — rejects raw control characters.</strong> A <code>json-stringify</code> parse-direction call fails with <code>omega/jvm/Exception: JSON error (missing entry in object)</code> when the input string contains raw control characters (ASCII 0–31 other than space, newline, tab) that are illegal in JSON. The fix is to fix the producer — tighten the LLM prompt so the model emits clean output.</p>
+
+<h2>HTTP</h2>
+
+<p><strong><code>http-request</code></strong> is the general-purpose HTTP term and the only safe HTTP primitive.</p>
+
+<pre><code>;; GET with query params
+(= Req {"method" "get"
+         "url" "https://api.example.com/contacts"
+         "headers" {"Authorization" "Bearer token123"}
+         "query-params" {"locationId" "abc" "limit" "100"}})
+(http-request Req Res)
+(get Res "status" Status)    ;; 200
+(get Res "body" Body)        ;; response body as string — must be parsed separately
+
+;; POST with JSON body
+(= Req {"method" "post"
+         "url" "https://api.example.com/contacts"
+         "headers" {"Authorization" "Bearer token123"
+                    "Content-Type" "application/json"}
+         "body" "{\"firstName\": \"Jane\"}"})
+(http-request Req Res)</code></pre>
+
+<p><strong>The <code>body</code> field is always a raw JSON string, never a parsed map.</strong> Parse it with <code>json-stringify</code> in parse-direction before accessing fields. Always branch on <code>status</code> BEFORE parsing <code>body</code>.</p>
+
+<pre><code>;; Full error-handling pattern
+(= Req {"method" "post" "url" Url "headers" Headers "body" JsonBody})
+(http-request Req Res)
+(get Res "status" Status)
+(when-not (= Status 200)
+  (get Res "body" ErrBody)
+  (= ErrData {"status" Status "body" ErrBody "url" Url})
+  (throw "HTTP_ERROR" ErrData))
+;; only parse body after confirming success
+(get Res "body" RawBody)
+(json-stringify ParsedBody RawBody)
+(get ParsedBody "id" ResultId)</code></pre>
+
+<h3>Deprecated method-specific HTTP terms</h3>
+
+<p><code>http-get-request</code>, <code>http-post-request</code>, and <code>http-delete-request</code> are <strong>deprecated</strong>. They do not capture HTTP error codes. Any clause using them that hits a non-2xx response will silently fail to bind the expected response fields. Use <code>http-request</code> with the <code>"method"</code> key instead.</p>
+
+<h2>Symbols in Literal Arguments</h2>
+
+<p>Symbol bindings do not resolve inside literal map or list arguments passed directly to any term. The contents of the literal are read at parse time, before the runtime has bound symbols — so <code>{"key" MySymbol}</code> becomes a literal map with the text <code>"MySymbol"</code>, not the value of <code>MySymbol</code>.</p>
+
+<p><strong>The fix is always the same:</strong> bind the map to a variable with <code>(=)</code> first, then pass the variable.</p>
+
+<pre><code>;; WRONG — Payload stays as a literal symbol name
+(throw "error-tag" {"payload" Payload "count" 42})
+
+;; RIGHT — bind the map to a symbol first, then pass the symbol
+(= Data {"payload" Payload "count" 42})
+(throw "error-tag" Data)</code></pre>
+
+<p>Same pattern applies to <code>run-page</code>, <code>set-data</code>, and any term that accepts a map or list argument. This also applies to inline key vectors passed to index terms — bind the key list first:</p>
+
+<pre><code>;; WRONG — Tid stays symbolic inside the inline list
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId [Tid] RowPageId)
+
+;; RIGHT — bind the key vector first
+(= RowKey [Tid])
+(Qo.Public.OqlApi.Db.Prop/row-index StrategiesDbId RowKey RowPageId)</code></pre>
+
+<h3>List-wrapper edge case</h3>
+
+<p>A bound map can still leak through as a symbolic placeholder when wrapped in an inline one-element list literal. Use <code>fold</code> + <code>append</code> to build a list from maps instead:</p>
+
+<pre><code>;; Safe pattern — build the list through fold
+(= NextArg {"step" "Load Subjects" "skip" NextSkipStr "limit" BatchSize})
+(fold [] NextArg append NextArgs)
+(= Result {"has-more" "true" "next-args" NextArgs})</code></pre>
+
+<h2>Data Transformation Patterns</h2>
+
+<h3>Preparing data for write-table</h3>
+
+<p><code>write-table</code> expects columnar input: <code>{"file-id" FolderId "data" {"header" [...] "rows" [...]}}</code>. The efficient pattern:</p>
+
+<ol>
+  <li>Define the header array once (this is the column order contract).</li>
+  <li>For each record, use <code>get-list</code> or <code>zip</code> (reverse) to extract values in that exact order.</li>
+  <li>Pass <code>{"header" Header "rows" [Values]}</code> to <code>write-table</code>.</li>
+</ol>
+
+<pre><code>(= Header ["name" "email" "status"])
+(get-list Record ["name" "email" "status"] Row)
+(= Input {"file-id" PageId "data" {"header" Header "rows" [Row]}})
+(Qo.Public.OqlApi.Db.Prop/write-table Input _)</code></pre>
+
+<table>
+  <tr><th>Need</th><th>Term</th></tr>
+  <tr><td>Combine fields from two sources</td><td><code>merge</code></td></tr>
+  <tr><td>Extract values in column order (for <code>write-table</code>)</td><td><code>get-list</code> or <code>zip</code> (reverse)</td></tr>
+  <tr><td>Convert row array + header to map</td><td><code>zip</code> (forward)</td></tr>
+  <tr><td>Drop unwanted fields from a map</td><td><code>select-keys</code></td></tr>
+</table>

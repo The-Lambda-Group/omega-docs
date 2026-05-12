@@ -1,0 +1,92 @@
+<h1>Data Operations</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Drop rows with forced unification failure</h2>
+
+<p>How to deliberately exclude rows from a solution table in OQL using the <code>(= true false)</code> idiom.</p>
+
+<h3>When to use this</h3>
+
+<p>Any time you want a <code>with-table-if</code> branch to drop rows rather than write them. Typical use cases:</p>
+<ul>
+  <li>Filtering out HTTP responses that shouldn't be processed (e.g. 422s)</li>
+  <li>Excluding rows that match a sentinel value from an otherwise-writable solution</li>
+  <li>Short-circuiting a branch during debugging</li>
+</ul>
+
+<h3>The idiom</h3>
+
+<pre><code>;; Drop rows where HttpStatus is 422
+(with-table-if (= HttpStatus 422)
+  [AgentLink HttpStatus Result]
+  (= true false)    ;; then: fail the branch — row drops from the solution
+  (= true true))    ;; else: pass through unchanged</code></pre>
+
+<p><code>(= true false)</code> attempts to unify two values that cannot match, which fails the branch. In the SQL UNION analogy from Control Flow, this is equivalent to <code>SELECT ... WHERE 1=0</code> for one of the two CTEs — the rows matching the condition simply don't appear in the output.</p>
+
+<h2>Handle HTTP 422 responses in status dispatch</h2>
+
+<p>A dispatch that explicitly handles 2xx and 400 doesn't match 422. A <code>with-table-if</code> branch that matches only <code>(or (&lt;= 200 HttpStatus 299) (= 400 HttpStatus))</code> leaves 422 and every other non-200/400 status unmatched. Those rows fall through to the downstream table with their branch-scoped symbols unbound. <code>write-table</code> then tries to materialize those rows, can't resolve the unbound symbols, and errors with <code>WRITING_SYMBOLS</code>.</p>
+
+<p>The fix: add an explicit filter before the write gate, using the row-drop idiom:</p>
+
+<pre><code>;; Drop 422s before the write gate
+(with-table-if (= HttpStatus 422)
+  [AgentLink HttpStatus Result]
+  (= true false)    ;; drop 422 rows
+  (= true true))    ;; pass everything else
+
+;; Now safe to dispatch on 2xx vs 400
+(with-table-if (&lt;= 200 HttpStatus 299)
+  [AgentLink HttpStatus Result]
+  (= Result {"status" "success"})
+  (= Result {"status" "error"}))</code></pre>
+
+<h2>Code-step pagination pattern</h2>
+
+<p>A <strong>code step</strong> is a workflow agent step with no LLM call — it reads input data deterministically, calls an adapter or performs a computation, and writes results. When the input list is too large to process in one Coordinator firing, the step must paginate: fire once per batch, pass a cursor forward, and stop when the list is exhausted.</p>
+
+<h3>The five load-bearing pieces</h3>
+
+<h4>1. Skip / Limit / Revision input args</h4>
+
+<p>OnEvent reads three optional args from <code>Exec.args[0]</code>:</p>
+<ul>
+  <li><code>skip</code> (default <code>"0"</code>) — positional cursor into the sorted input list.</li>
+  <li><code>limit</code> (default <code>"1"</code>) — how many items to process this firing. Caller controls batch size; the implementation never hard-codes it.</li>
+  <li><code>revision</code> (optional) — if present, this firing is continuing an in-progress drain at the named revision; if absent, compute a fresh revision.</li>
+</ul>
+
+<p>All three are numeric strings (OQL convention). Parse with <code>json-stringify</code> before arithmetic.</p>
+
+<h4>2. Deterministic sort</h4>
+
+<p>The input list must be sorted deterministically across firings. If the sort order changes between firings, skip/limit will return wrong items on the second firing. Use a stable sort key (UUID, created-at timestamp, or any value that doesn't change between firings).</p>
+
+<h4>3. Revision continuity</h4>
+
+<p>A <code>revision</code> arg binds all firings in a multi-batch drain to the same logical snapshot. The first firing computes a fresh revision (e.g., a UUID). Subsequent firings pass the same revision back in. The step reads data at the revision snapshot, not the current live state — this prevents a mid-drain write from changing the count or order of items and causing the drain to skip or double-process items.</p>
+
+<h4>4. has-more signal</h4>
+
+<p>The result envelope must include a <code>has-more</code> field. When the step processes its batch and finds that <code>skip + batch-size &lt; total-count</code>, it returns <code>"has-more": "true"</code> and the next-args needed for the Coordinator to fire again. When <code>skip + batch-size &gt;= total-count</code>, it returns <code>"has-more": "false"</code> and the drain is complete.</p>
+
+<h4>5. Compute has-more and next-args</h4>
+
+<pre><code>(:- (ComputeExecHasMore Skip Limit TotalCount HasMore NextSkipStr)
+    (+ Skip Limit NextSkip)
+    (with-table-if (&lt; NextSkip TotalCount)
+      [Skip Limit TotalCount HasMore NextSkipStr NextSkip]
+      (and (= HasMore "true")
+           (json-stringify NextSkip NextSkipStr))
+      (and (= HasMore "false")
+           (= NextSkipStr "0"))))</code></pre>
+
+<h3>Canonical exemplars</h3>
+
+<ul>
+  <li>Execute step: introduced <code>ResolveLimit</code>, <code>BatchTakeN</code>, and <code>ComputeExecHasMore</code>.</li>
+  <li>Sync Results step: cargo-culted those three helpers, added <code>ResolveSkip</code> and <code>ResolveOrComputeRevision</code>, and established the deterministic-sort requirement.</li>
+</ul>

@@ -1,0 +1,76 @@
+<h1>Agent-Step Patterns</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>This doc is meta — it's about how to write plans and agent step implementations that produce well-shaped OQL. The plan structure dominates over the docs the implementer reads: if the plan instructs "add this code to OnEvent's body" task by task, the resulting OnEvent will be inline and nested no matter how many times the implementer re-reads the clauses reference. The discipline lives in the plan, not in the prompt.</p>
+
+<h2>Hard rule: develop-oql is mandatory in every OQL plan</h2>
+
+<p><strong>Every plan that touches OQL implementation work MUST list the develop-oql guide as the single most important doc in its mandatory KB reading section.</strong> The doc must appear FIRST, with emphatic framing and a brief explanation of why it's load-bearing.</p>
+
+<p>This is non-negotiable. A plan that lists the mandatory KB reading without surfacing this doc with maximum emphasis is a malformed plan. The orchestrator's responsibility: when reviewing a plan before dispatching subagents, verify this rule is satisfied as a first check. If absent: add it before dispatching, OR fail the plan back to the plan-author.</p>
+
+<h2>Plan shape rules</h2>
+
+<p>A plan that builds a workflow OnEvent (or any large entry-point clause) must:</p>
+
+<ol>
+  <li><strong>Define the helpers before the entry-point.</strong> A task list that adds ResolveCtx in Task 2, ReadInputs in Task 3, and OnEvent in Task 7 naturally produces a well-decomposed OnEvent. A task list that adds "OnEvent logic" incrementally across 5 tasks produces a 90-line monolith.</li>
+  <li><strong>Name the target shape in the plan.</strong> State explicitly: "OnEvent must follow the canonical shape: thin entry-point (5–15 lines), phase-level orchestrators (2–4 children each), leaf helpers (5–10 lines each)." Without this constraint in the plan, the implementer fills the available space.</li>
+  <li><strong>Require the call graph to be committed before any body is written.</strong> A Task 0 that sketches the call graph (OnEvent → [ResolveCtx, ProcessThinkPhase, ProcessFormatPhase] → leaves) and requires user review before code is written prevents the flat anti-pattern from appearing at all.</li>
+</ol>
+
+<h2>Agent-step write shapes</h2>
+
+<p>Four patterns recur in agent step write paths (Manager, Researcher, Strategist, Copywriter, Critic, Analyst). Picking the wrong pattern produces silent corruption, key conflicts, cold-start no-returns, or silent mis-sourcing.</p>
+
+<h3>Pattern 1 — Uniqueness validation against a source array, not a folded accumulator</h3>
+
+<p>When validating LLM-produced records for duplicate keys, measure the source array's length, not the post-fold accumulator. OQL fold folds over unique values — duplicate solutions are collapsed before they reach the reducer. A check that folds the keys and compares fold output lengths will always report "no duplicates":</p>
+
+<pre><code>;; WRONG — AllKeys is already deduplicated by the time you measure its length
+(get Drafts _ Draft)
+(get Draft "treatment_id" Tid)
+(fold [] PairKey append AllKeys)
+(length AllKeys Total)              ;; Total = unique count, not row count
+
+;; RIGHT — measure the input array
+(length Drafts Total)               ;; Total = source-array row count
+(call IntoSet AllKeys UniqueSet)
+(fold [] UKey append UniqueKeys)
+(length UniqueKeys UniqueCount)
+(with-table-if (= UniqueCount Total) [...] ok throw-duplicate-keys)</code></pre>
+
+<h3>Pattern 2 — Per-row HTML block writes via run-term</h3>
+
+<p>Writing HTML blocks per row (e.g., writing a Strategist output to each treatment's row page) requires <code>run-term</code> per-row invocation, not <code>call</code>. The reason: <code>add-or-get-by-name!</code> across N per-row pages returns the same Block for every row if any of them already has a block with the target name. Using <code>run-term</code> gives each invocation a fresh solution scope with only that row's page in context, preventing the block-UUID collision.</p>
+
+<h3>Pattern 3 — Text-column writes via write-table</h3>
+
+<p>Writing text columns (e.g., Copywriter's generated copy) to a database table uses <code>write-table</code> with a columnar input envelope:</p>
+
+<pre><code>(= Header ["treatment_id" "draft" "copy_text"])
+(get-list Row ["treatment_id" "draft" "copy_text"] Values)
+(= Input {"file-id" TablePageId "data" {"header" Header "rows" [Values]}})
+(Qo.Public.OqlApi.Db.Prop/write-table Input _)</code></pre>
+
+<p>The header array is the column order contract. <code>get-list</code> extracts values in that exact order. This is correct and efficient — do not extract fields one-by-one with individual <code>get</code> calls.</p>
+
+<h3>Pattern 4 — LLM audit specificity (Analyst / Critic)</h3>
+
+<p>An audit or critic agent step must re-read source data fresh, not summarize from prior verdicts. If the step's prompt passes prior verdicts as context and asks the LLM to audit "based on what you see," the LLM will summarize the prior verdicts rather than run a real audit. This passes all validation checks (the format looks correct) while silently mis-sourcing (the audit was of the verdicts, not the source).</p>
+
+<p>The fix: structure the prompt to require the LLM to read and cite source data explicitly. The step's input must be the source data, not the prior verdicts.</p>
+
+<h2>Superpowers plan structure</h2>
+
+<p>Every superpowers plan and every superpowers spec must contain these four sections at the top, in this order, before the first task:</p>
+
+<ol>
+  <li><strong>Required Reading</strong> — the docs the implementer must read before any code change.</li>
+  <li><strong>Pre-flight Rules</strong> — the rules the implementer re-reads before EVERY push.</li>
+  <li><strong>Floundering Signals</strong> — the symptoms that mean STOP, regardless of plan progress.</li>
+</ol>
+
+<p>Without these three sections, the plan is missing its safety infrastructure. An implementer who skips them is flying without instruments — and every prior multi-session OQL build that failed shared the pattern of missing at least one of these sections.</p>

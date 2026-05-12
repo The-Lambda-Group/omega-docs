@@ -1,0 +1,76 @@
+<h1>Scratch Queries</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>Scratch queries are bare top-level term sequences with no clause mechanism. They are run with <code>qo run</code> or <code>qo query</code>. Scratch queries are <strong>read-only</strong> — no mutations.</p>
+
+<h2>Always end with (return [Result])</h2>
+
+<p>Unlike implementation files (where clauses return via the head binding), scratch queries have no implicit return path. If you bind <code>Result</code> but never call <code>(return [Result])</code>, the query runner produces no result and the API returns a bare HTTP 500 with no error message, no stack trace, and nothing actionable.</p>
+
+<pre><code>;; WRONG — bare 500, no diagnostics
+(= Result "hello")
+
+;; RIGHT
+(= Result "hello")
+(return [Result])</code></pre>
+
+<p>The 500 with no body is the only signal that <code>(return [...])</code> is missing. There is no other indication. Memorize this pattern.</p>
+
+<h2>Scratch queries are read-only</h2>
+
+<p>Scratch files have no review trail, no implementation identity, and no protocol scoping. A mutation that lands from a scratch file is untraceable. The rules:</p>
+
+<ul>
+  <li>No <code>!</code>-suffixed terms that write to datastores.</li>
+  <li>No <code>delete!</code>, <code>refresh</code>, or any write operation.</li>
+  <li>No <code>write-table</code>, <code>set-data</code>, or similar mutations.</li>
+</ul>
+
+<p>Scratch queries are for read-only inspection, returning bound values for dry-run verification, and building up an understanding of the data shape before writing an implementation.</p>
+
+<h2>Calling a !-suffixed clause from a scratch file</h2>
+
+<p>Using <code>(Ds/term! Args)</code> in a scratch query body invokes the write pathway. If <code>Args</code> contains unbound symbols (which it almost always does in a scratch query), the engine throws <code>WRITING_SYMBOLS</code>. The read/write distinction is at the <em>call site</em>:</p>
+
+<pre><code>(Ds/term Args)   ;; READ — queries the stored clause, produces solutions
+(Ds/term! Args)  ;; WRITE — stores a clause (not what you want in a scratch query)</code></pre>
+
+<h2>Typical scratch query pattern</h2>
+
+<pre><code>;; Look up pages by folder
+(Qo.Public.OqlApi.Page/pages-by-folder FolderId Page)
+(get Page "page-id" PageId)
+(get Page "page-name" Name)
+(= Result {"page-id" PageId "name" Name})
+(return [Result])</code></pre>
+
+<h2>Inspecting intermediate state</h2>
+
+<p>When a scratch query produces unexpected results, return intermediate state to inspect:</p>
+
+<pre><code>;; Return intermediate values as a tuple for inspection
+(Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder FolderId PageId PropVals)
+(= Result [PageId PropVals])
+(return [Result])</code></pre>
+
+<p>You can bind <code>Result</code> to any combination of symbols. The <code>(return [...])</code> call accepts a vector of whatever you want to surface.</p>
+
+<h2>Count rows in a defterm (without OQL)</h2>
+
+<p>The recommended approach for pre-migration audits and sanity checks — it does not require a running OQL query.</p>
+
+<p>Every defterm-backed datastore is a CouchDB database. CouchDB maintains <code>doc_count</code> as O(1) view metadata.</p>
+
+<p><strong>Step 1 — Find the CouchDB database name:</strong></p>
+<pre><code>omega-cli db-name &lt;datastore-path&gt;</code></pre>
+
+<p>Use the datastore path (the string in the <code>datastore</code> declaration, not the OQL namespace symbol). For example:</p>
+<pre><code>omega-cli db-name "omega/query-omega/data/log-stream"
+# Output: omega_query-omega_data_log-stream</code></pre>
+
+<p><strong>Step 2 — Read doc_count from CouchDB:</strong></p>
+<pre><code>curl -s http://admin:password@localhost:5984/&lt;db-name&gt;/ | jq '.doc_count'</code></pre>
+
+<p>This stays fully outside OQL and outside Rule 2's scope (no direct <code>Qo.Data.*/</code> access). The <code>all-wildcard form</code> of <code>with-count</code> — <code>(with-count Cnt (Qo.Namespace/term _ _ _ _))</code> — currently fails with <code>omega/jvm/NullPointerException</code>, so this CouchDB approach is the only safe way to get a total row count.</p>

@@ -1,0 +1,118 @@
+<h1>Protocols</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>Protocols define the interface contract for component implementations. Each protocol has a unique ID and a JSON spec describing its methods.</p>
+
+<h2>Protocol Table</h2>
+
+<table>
+  <tr><th>Protocol</th><th>ID</th><th>Methods</th></tr>
+  <tr><td>Installable</td><td><code>cc26e497-ac49-4eb5-a99b-08cbf215fb73</code></td><td><code>install(self)</code></td></tr>
+  <tr><td>Service</td><td><code>e1b65387-6305-4883-88e7-115c0020f5fc</code></td><td><code>start(self)</code>, <code>stop(self)</code>, <code>status(self)</code></td></tr>
+  <tr><td>Event Handler</td><td><code>8795affb-6274-41ea-879d-d31b362c8695</code></td><td><code>on-event(self, event)</code></td></tr>
+  <tr><td>Query</td><td><code>6701cfb9-247a-471e-a038-cd6eb2db0cf0</code></td><td><code>run(self, input)</code></td></tr>
+</table>
+
+<h2>Specs</h2>
+
+<h3>Installable</h3>
+
+<pre><code>{
+  "name": "Installable",
+  "protocol-id": "cc26e497-ac49-4eb5-a99b-08cbf215fb73",
+  "spec": {
+    "methods": {
+      "install": { "args": ["self"] }
+    }
+  }
+}</code></pre>
+
+<p>Called once when a component is first installed into a workspace. Sets up pages, databases, subscriptions, and push connectors.</p>
+
+<h3>Service</h3>
+
+<pre><code>{
+  "name": "Service",
+  "protocol-id": "e1b65387-6305-4883-88e7-115c0020f5fc",
+  "spec": {
+    "methods": {
+      "start": { "args": ["self"] },
+      "stop": { "args": ["self"] },
+      "status": { "args": ["self"] }
+    }
+  }
+}</code></pre>
+
+<p>Long-running service lifecycle. <code>start</code> begins processing, <code>stop</code> halts it, <code>status</code> reports current state.</p>
+
+<h3>Event Handler</h3>
+
+<pre><code>{
+  "name": "Event Handler",
+  "protocol-id": "8795affb-6274-41ea-879d-d31b362c8695",
+  "spec": {
+    "methods": {
+      "on-event": { "args": ["self", "event"] }
+    }
+  }
+}</code></pre>
+
+<p>Receives events from page subscriptions. The <code>event</code> argument is a map with event data. Coordinators dispatch to sibling handlers via <code>run-page</code>.</p>
+
+<h3>Query</h3>
+
+<pre><code>{
+  "name": "Query",
+  "protocol-id": "6701cfb9-247a-471e-a038-cd6eb2db0cf0",
+  "spec": {
+    "methods": {
+      "run": { "args": ["self", "input"] }
+    }
+  }
+}</code></pre>
+
+<p>Stateless query execution. The <code>input</code> argument is a map of query parameters; returns results.</p>
+
+<h2>Usage Examples</h2>
+
+<h3>Install a component</h3>
+<pre><code>qo run "Component Installs/My App" -p "Installable" -m "install"</code></pre>
+
+<h3>Run a query</h3>
+<pre><code>qo run "Component Installs/My App/Queries/list-data" -p "Query" -m "run" -a '[{"limit": "10"}]'</code></pre>
+
+<h3>Trigger an event handler</h3>
+<pre><code>qo run "Component Installs/My App/Events/Coordinator" -p "Event Handler" -m "on-event" -a '[{"type": "refresh"}]'</code></pre>
+
+<h3>Start a service</h3>
+<pre><code>qo run "Component Installs/My App" -p "Service" -m "start"</code></pre>
+
+<h3>Check service status</h3>
+<pre><code>qo run "Component Installs/My App" -p "Service" -m "status"</code></pre>
+
+<h2>Implementation clause arity</h2>
+
+<p>OQL always dispatches implementation (protocol method) clauses with exactly <strong>2 positional args</strong>: <code>Exec</code> and <code>Result</code>. The clause signature is always:</p>
+
+<pre><code>(:- (MyClause Exec Result)
+    ...)</code></pre>
+
+<p>Extra method arguments are not passed as additional positional params. They arrive inside <code>Exec</code> under <code>["args" 0 ...]</code> and must be extracted with <code>get-in</code>. Writing a 3-arg signature is wrong — the dispatcher always calls with 2 args, so the clause will never unify and the method call will return no-return.</p>
+
+<p>This applies to all implementation clauses registered via <code>set-implementation-clauses</code>: <code>install</code>, <code>on-event</code>, <code>run</code>, and any other protocol methods.</p>
+
+<h2>Deploy an implementation fix</h2>
+
+<p>Every component exists in two places:</p>
+<ul>
+  <li><strong>Library-side (dev) component</strong> — the component in your developer library. <code>qo push [impl-file]</code> updates this one.</li>
+  <li><strong>Installed component</strong> — a separate copy installed into a specific workspace location. It has its own component-id and impl-id. <code>qo push</code> does NOT touch the installed component.</li>
+</ul>
+
+<p>If you push a fix and the running workflow continues to exhibit the old behavior, you have fixed the library side only. The installed component is still running the old clauses. Use <code>qo run</code> against the installed component's impl page to deploy the updated clauses to the running instance.</p>
+
+<h2>Fresh context on handler invocation</h2>
+
+<p>When an event subscription handler fires, it creates a <strong>fresh context</strong> — it does NOT inherit any state from the original emitter. The handler functor must be fully self-contained. You cannot pass runtime state through subscriptions — only through the event data payload.</p>

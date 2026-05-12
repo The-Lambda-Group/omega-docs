@@ -1,0 +1,18 @@
+<h1>OQL Concepts</h1>
+
+<p>Conceptual explanations of the Omega platform and how OQL fits into it. These docs answer "what is this?" and "why does it work this way?" — the understanding layer that makes the language reference and guides make sense in context.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="platform-overview">Platform Overview</a> — What Omega is, what pages are, what blocks are, how the page tree is organized, and OQL's role as the logic language that makes it all queryable.</li>
+  <li><a href="components">Components, Protocols &amp; Plugins</a> — How components, protocols, and implementations compose the Omega code model; what a plugin is and what it creates when installed.</li>
+  <li><a href="agent-step-patterns">Agent-Step Patterns</a> — Plan shape rules that produce well-shaped OQL, agent-step write shapes (uniqueness validation, HTML-block writes, text-column writes, LLM audit specificity), and the agent-readable page tree convention.</li>
+  <li><a href="run-term-scaling">run-term Scaling</a> — Why <code>call</code> hangs at K~40 rows in per-row iteration, when to switch to <code>run-term</code>, the partition-before-fold pattern for <code>with-group-by</code> replacement, and empirical evidence from MAB Allocate V1.</li>
+  <li><a href="llm-discipline">LLM Output Discipline</a> — Why string-scrubbing at the JSON parse boundary is the wrong response to LLM output failures, what the two correct responses are (fix the prompt, or file a parser-bug gap), and what the underlying parse-strictness rule actually is.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>OQL language constructs live in <a href="../language">Language Reference</a>. Step-by-step recipes live in <a href="../guides">Guides</a>. Public API clauses live in <a href="../api">Public API</a>.</p>

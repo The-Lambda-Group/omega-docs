@@ -1,0 +1,16 @@
+<h1>Datastores &amp; Storage</h1>
+
+<p>Data in OQL lives in datastores — named locations that hold terms (facts and rules). This section covers the full storage model: how to declare datastores and functors, how defterm primary-key semantics work and when adding one is destructive, and the singleton-row edge case where the index model has no clean answer.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="datastores">Datastores, Functors &amp; Indexes</a> — Declaring datastores and using them as namespace prefixes, functor creation, defterm syntax, write-index for secondary indexes.</li>
+  <li><a href="defterm">defterm Semantics</a> — What defterm actually controls (row-id derivation), when to add one, when NOT to add one, the destructive-rekey consequence of adding a defterm to a term with data, and how to triage full-scan errors without reaching for a defterm.</li>
+  <li><a href="singleton-lookup">Singleton-Row Lookup</a> — Why terms that hold exactly one row with no input arg cannot be served by any index, why defterm doesn't help, and why the enable-full-scan bookend is the current working answer.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>Public API clauses for the database property system live in <a href="../api">Public API</a>. Hard rules on never opening internal datastores directly live in <a href="../language/hard-rules">Hard Rules</a>.</p>
