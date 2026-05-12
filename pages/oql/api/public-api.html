@@ -121,6 +121,53 @@
   <tr><td><code>installed-page-event-handler</code></td><td><code>(Qo.Public.OqlApi.PageSub/installed-page-event-handler InstalledPage HandlerFunc)</code></td></tr>
 </table>
 
+<h2>Qo.Public.Api.Page</h2>
+
+<p>HTTP-layer page operations — create, read, search, and manage pages via the public REST-facing API. Datastore: <code>omega/query-omega/public/api/page</code></p>
+
+<p>These clauses are invoked by the HTTP layer (bang variants dispatched from the server). OQL component code should use <code>Qo.Public.OqlApi.Page</code> clauses instead. The primary use case for calling <code>Qo.Public.Api.Page</code> directly from OQL is in install scripts and bootstrap queries that need root-level page creation without a parent context.</p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th></tr>
+  <tr><td><code>add-page</code></td><td><code>(Qo.Public.Api.Page/add-page {"app-id" AppId "name" Name} Response)</code></td></tr>
+  <tr><td><code>get-page</code></td><td><code>(Qo.Public.Api.Page/get-page {"page-id" PageId} Response)</code></td></tr>
+  <tr><td><code>get-pages</code></td><td><code>(Qo.Public.Api.Page/get-pages {"app-id" AppId} Response)</code></td></tr>
+  <tr><td><code>get-page-blocks</code></td><td><code>(Qo.Public.Api.Page/get-page-blocks {"page-id" PageId} Response)</code></td></tr>
+  <tr><td><code>set-page-name</code></td><td><code>(Qo.Public.Api.Page/set-page-name {"page-id" PageId "name" Name} Response)</code></td></tr>
+  <tr><td><code>page-search</code></td><td><code>(Qo.Public.Api.Page/page-search {"q" Q} Response)</code></td></tr>
+</table>
+
+<h3>add-page — root-level page creation</h3>
+
+<p><code>add-page</code> is the correct clause for creating a page directly under the workspace root. It accepts an input map with the following keys:</p>
+
+<ul>
+  <li><code>"app-id"</code> (required) — the workspace app ID</li>
+  <li><code>"name"</code> (required) — page name</li>
+  <li><code>"folder-id"</code> (optional) — parent folder ID. When omitted, the clause resolves the workspace root folder automatically via <code>Qo.Page/root-folder</code>.</li>
+  <li><code>"is-database"</code> (optional) — set to <code>"true"</code> to create a database page; defaults to a regular page with an empty blocks list.</li>
+</ul>
+
+<p>Response shape:</p>
+<pre>{"app-id" AppId "page-id" PageId "folder-id" FolderId "page-data" PageData}</pre>
+
+<p><strong>Critical difference from <code>add-or-get-sub-page-by-name</code>:</strong> <code>add-page</code> writes <strong>only the page record</strong> — it does not write a parent PageBlock. <code>Qo.Public.OqlApi.Page/add-sub-page</code> (which <code>add-or-get-sub-page-by-name</code> delegates to) writes a <code>PageBlock</code> on the parent page via <code>Qo.Wr/write-data</code> after creating the child. The PageBlock write requires a parent page object and attaches the child to the parent's block list. For root-level pages, there is no parent page object — the root container is the workspace folder, not a page — so <code>add-or-get-sub-page-by-name</code> cannot be used for root-level creation.</p>
+
+<table>
+  <tr><th></th><th><code>add-page</code></th><th><code>add-or-get-sub-page-by-name</code></th></tr>
+  <tr><td>Parent required</td><td>No — resolves root folder automatically when <code>folder-id</code> omitted</td><td>Yes — requires a parent Page object</td></tr>
+  <tr><td>Writes PageBlock on parent</td><td>No</td><td>Yes (<code>Qo.Wr/write-data SubPageBlock _</code>)</td></tr>
+  <tr><td>Idempotent (get-or-create)</td><td>No — always creates a new page</td><td>Yes — returns existing if name matches</td></tr>
+  <tr><td>Correct for root-level creation</td><td>Yes</td><td>No — fails because the root is a folder, not a page</td></tr>
+  <tr><td>Correct for sub-page creation</td><td>Only if caller manages the PageBlock write separately</td><td>Yes</td></tr>
+</table>
+
+<p><strong>When to use each:</strong></p>
+<ul>
+  <li>Use <code>Qo.Public.Api.Page/add-page</code> when creating a top-level page under the workspace root, or when you need to create a page without a parent PageBlock (e.g., pages that will be wired up manually or via a different block-write step).</li>
+  <li>Use <code>Qo.Public.OqlApi.Page/add-or-get-sub-page-by-name</code> when creating a child page under an existing parent page, especially for idempotent install scripts that should not create duplicate pages on re-run.</li>
+</ul>
+
 <h2>Qo.Public.Api.Run</h2>
 
 <p>Run implementations by page reference or page ID. Datastore: <code>omega/query-omega/public/api/run</code></p>
