@@ -71,6 +71,28 @@
   <tr><td><code>add-or-get-by-name</code></td><td><code>(Qo.Public.OqlApi.Comp/add-or-get-by-name Page Name Comp)</code></td></tr>
 </table>
 
+<h2>Qo.Public.OqlApi.Page.Comp</h2>
+
+<p>Component association on install pages. Datastore: <code>omega/query-omega/public/oql-api/page/component</code></p>
+
+<p>Page.Comp stores which component is linked to an install page — the association that determines what runs when you <code>qo run</code> that page. This is distinct from the <code>ComponentBlock</code> on a library page: a ComponentBlock declares the component type definition and lives in <code>Qo.Public.OqlApi.Page/page-blocks</code>, whereas Page.Comp stores the runtime association on an install page. These are separate datastores storing different things.</p>
+
+<p><strong>Use Page.Comp on install pages only.</strong> Library pages use ComponentBlock (via <code>page-blocks</code>) to declare component type definitions — Page.Comp does not apply to them.</p>
+
+<table>
+  <tr><th>Clause</th><th>Signature</th><th>Notes</th></tr>
+  <tr>
+    <td><code>page-component</code></td>
+    <td><code>(Qo.Public.OqlApi.Page.Comp/page-component AppId PageId PageComp)</code></td>
+    <td>Reads the component association on a page. Returns a <code>PageComp</code> record with keys <code>"component-id"</code>, <code>"component-app-id"</code>, <code>"page-id"</code>, <code>"app-id"</code>, <code>"type"</code>. Use on install pages to discover what component is linked to them.</td>
+  </tr>
+  <tr>
+    <td><code>set-page-component</code></td>
+    <td><code>(Qo.Public.OqlApi.Page.Comp/set-page-component AppId PageId ComponentRef Result)</code></td>
+    <td>Sets the component association on a page. Called internally by <code>qo set-component</code>. Do not call on library pages.</td>
+  </tr>
+</table>
+
 <h2>Qo.Public.OqlApi.Proto</h2>
 
 <p>Protocol definitions. Datastore: <code>omega/query-omega/public/oql-api/protocol</code></p>
