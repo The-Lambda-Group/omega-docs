@@ -113,6 +113,21 @@
   <li>If any link is missing, the data integrity is broken — not the helper logic.</li>
 </ol>
 
+<h2>Triage in the worktree, not in scratch</h2>
+
+<p>Scratch queries are not always a clean triage environment. When the behavior you are investigating depends on multi-solution context — for example, a step that runs across many arms or rows simultaneously — a standalone scratch query cannot reproduce that context. Timings will be misleading, and a fix validated in scratch may not hold in the real component.</p>
+
+<p><strong>When scratch gives misleading results, switch to worktree triage.</strong> The approach mirrors the frame-shrink discipline in rule 2, but applied to the live running implementation:</p>
+
+<ol>
+  <li><strong>Open the implementation file in the affected project's worktree.</strong> Do not create a parallel scratch file.</li>
+  <li><strong>Strip terms from the bottom of the clause body up.</strong> Comment out terms one at a time, exactly as you would move the <code>(return [Result])</code> earlier in scratch. At each position, push the change and run against the real component.</li>
+  <li><strong>Observe the result with each change.</strong> You are narrowing the frame of the live component, not the frame of a simulation. This produces timings and error messages that match production.</li>
+  <li><strong>Restore the terms once you have identified the cause.</strong> Worktree triage is a read-probe cycle, not a rewrite. Restore bottom-up exactly as you stripped top-down.</li>
+</ol>
+
+<p>Worktree triage is the correct first move whenever the failure involves scaling, multi-solution context, or cross-component state that a scratch query cannot replicate.</p>
+
 <h2>println-stream corrupts solution context</h2>
 
 <p><code>println-stream</code> has a side effect: it modifies the solution context. If you call <code>println-stream</code> before binding your <code>Result</code> symbol, the solution context may be corrupted and <code>Result</code> becomes unresolvable. Always bind <code>Result</code> first, then log. Prefer the <code>print-stream</code> query (Omega Queries component) over raw <code>println-stream</code>.</p>
