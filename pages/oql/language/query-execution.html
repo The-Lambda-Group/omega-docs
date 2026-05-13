@@ -111,6 +111,38 @@
 
 <p>For example, <code>FolderIndex</code> indexes on <code>args.1</code>. A clause call that binds <code>args.1</code> to a folder ID will resolve through <code>FolderIndex</code> and skip/limit will work. A clause call that only binds <code>args.2</code> won't match <code>FolderIndex</code>, will fall back to Mango, and skip/limit will be ignored.</p>
 
+<h2>The mango-query built-in</h2>
+
+<p><code>mango-query</code> is an explicit built-in term for issuing a raw CouchDB Mango query against a datastore. It is distinct from the automatic Mango fallback that fires in Strategy 3 — it does not go through the index-selection algorithm at all. Its signature is:</p>
+
+<pre><code>(mango-query Ds Mango Object)</code></pre>
+
+<ul>
+  <li><strong><code>Ds</code></strong> — a bound datastore ID.</li>
+  <li><strong><code>Mango</code></strong> — a bound map containing the Mango selector (e.g. <code>{"selector" {"field" {"$eq" Value}}}</code>).</li>
+  <li><strong><code>Object</code></strong> — output variable; bound to each matching document map.</li>
+</ul>
+
+<h3>Mandatory enable-full-scan bookends</h3>
+
+<p><strong>Every use of <code>mango-query</code> requires explicit <code>(enable-full-scan)</code> / <code>(disable-full-scan)</code> bookends — no exceptions.</strong></p>
+
+<p>The engine reads <code>:omega-db.run/allow-full-scan?</code> from the OQL execution context before issuing the Mango call. If the flag is not set (i.e. <code>enable-full-scan</code> has not been called), <code>find-docs</code> throws <code>omega/query/full-scan</code> immediately — the query never executes.</p>
+
+<p>This is different from Strategy 3. In Strategy 3, the full-scan flag gates whether the <em>automatic Mango fallback</em> is allowed when no write-index matches. With <code>mango-query</code>, the Mango call is always deliberate — but the flag is still checked, so the requirement is unconditional.</p>
+
+<p>Correct pattern:</p>
+
+<pre><code>(enable-full-scan)
+(if (mango-query Ds Mango Object)
+  (= Result {"found" true "data" Object})
+  (= Result {"found" false}))
+(disable-full-scan)</code></pre>
+
+<p>The bookend pair must wrap every invocation site. If <code>mango-query</code> is called inside a captured helper, the bookends must be placed in the helper's body, not in the caller — each execution context has its own ctx.</p>
+
+<p><strong>Common mistake:</strong> placing the bookends only around the outer clause body but calling <code>mango-query</code> inside a nested helper. The helper runs in its own sub-context and does not inherit the flag.</p>
+
 <h2>Singleton-row term lookup</h2>
 
 <p>Some terms hold exactly one row by design — a global config, a singleton service descriptor. The natural call shape for reading that row is arity-1 with the single arg as the output:</p>
