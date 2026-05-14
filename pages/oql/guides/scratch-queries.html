@@ -30,6 +30,35 @@
 
 <p>Scratch queries are for read-only inspection, returning bound values for dry-run verification, and building up an understanding of the data shape before writing an implementation.</p>
 
+<h2>run-term in scratch file top-level fires once — not per solution</h2>
+<p><code>run-term</code> in the top-level body of a scratch file fires <strong>once</strong> regardless of how many solutions are in scope from a preceding generator like <code>prop-vals-by-folder</code>. It does not iterate over all solutions the way it does inside a clause body.</p>
+<p><strong>Wrong pattern (only processes one row):</strong></p>
+<pre><code>(prop-vals-by-folder FolderId RowPid RowPv)   ;; N solutions
+(get-in RowPv ["prop-vals" "content"] Content)
+(run-term MyHelper RowPid Content Done)        ;; fires ONCE, not N times
+(fold [] Done append Dones)                    ;; Dones = ["ok"], length 1</code></pre>
+<p><strong>Correct pattern — collect into list first, iterate inside a clause body:</strong></p>
+<pre><code>;; Outer body: collect all inputs into a list (single solution after fold)
+(prop-vals-by-folder FolderId RowPid RowPv)
+(get-in RowPv ["prop-vals" "content"] Content)
+(= Pair [RowPid Content])
+(fold [] Pair append Pairs)
+
+;; Clause body: iterate the list, run-term fires N times inside here
+(:- (ProcessAll Pairs Done {"capture" [MyHelper]})
+    (with-table-if (get Pairs 0 _)
+      [Pairs MyHelper Done]
+      (and (get Pairs _ Pair)
+           (get Pair 0 RowPid)
+           (get Pair 1 Content)
+           (run-term MyHelper RowPid Content ItemDone)
+           (fold [] ItemDone append _)
+           (= Done "ok"))
+      (= Done "skipped")))
+
+(call ProcessAll Pairs _)
+(return [Result])</code></pre>
+
 <h2>Calling a !-suffixed clause from a scratch file</h2>
 
 <p>Using <code>(Ds/term! Args)</code> in a scratch query body invokes the write pathway. If <code>Args</code> contains unbound symbols (which it almost always does in a scratch query), the engine throws <code>WRITING_SYMBOLS</code>. The read/write distinction is at the <em>call site</em>:</p>
