@@ -139,6 +139,16 @@
 
 <p><strong>json-stringify parse direction is strict — rejects raw control characters.</strong> A <code>json-stringify</code> parse-direction call fails with <code>omega/jvm/Exception: JSON error (missing entry in object)</code> when the input string contains raw control characters (ASCII 0–31 other than space, newline, tab) that are illegal in JSON. The fix is to fix the producer — tighten the LLM prompt so the model emits clean output.</p>
 
+<h3>json-stringify with integer values — direction trap</h3>
+<p>When stringifying integers extracted from JSON (e.g. <code>position</code>, <code>delay_days</code>), the integer is an OQL Long, not a string. The stringify direction requires the Long as the <strong>first</strong> argument:</p>
+<pre><code>;; CORRECT — stringify direction: object first, string second
+(json-stringify IntegerVar StringVar)   ;; IntegerVar = 1 → StringVar = "1"
+
+;; WRONG — parse direction with a Long in second position
+(json-stringify StringVar IntegerVar)   ;; throws ClassCastException: Long cannot be cast to String</code></pre>
+<p>The error <code>ClassCastException: java.lang.Long cannot be cast to java.lang.String</code> with no stack hint means the direction is inverted. Check every <code>json-stringify</code> call that touches a number.</p>
+<p>Also: <code>(fold [] _ append _)</code> is invalid — <code>_</code> is a wildcard and cannot be folded over. Name the variable: <code>(run-term Helper ... ItemDone)</code> then <code>(fold [] ItemDone append _)</code>. Using <code>_</code> throws <code>IllegalArgumentException: Don't know how to create ISeq from: clojure.lang.Symbol</code>.</p>
+
 <h2>HTTP</h2>
 
 <p><strong><code>http-request</code></strong> is the general-purpose HTTP term and the only safe HTTP primitive.</p>
