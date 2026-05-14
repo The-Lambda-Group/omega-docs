@@ -27,6 +27,20 @@
 (when (= Step "filter") (= PageName "Filter Agents"))
 (when (= Step "batch")  (= PageName "GHL Sync"))</code></pre>
 
+<h3>when-not in multi-solution context is all-or-nothing</h3>
+<p><code>(when-not condition)</code> is a <strong>universal quantifier</strong>: it succeeds only when the condition produces zero solutions across the <em>entire</em> current solution table. In a multi-solution context (e.g. after <code>prop-vals-by-folder</code> returns N rows), <code>when-not</code> is not a per-row filter — it passes through all solutions only if <em>no</em> solution in the table satisfies the condition.</p>
+<pre><code>;; WRONG — filters to only rows where NO solution in the table has a block
+(prop-vals-by-folder FolderId RowPid RowPv)
+(page-by-id RowPid RowPage)
+(when-not (get-content RowPage "Content" _))   ;; passes ALL or NONE</code></pre>
+<p>To filter per-row, use <code>if</code> for per-solution branching, or restructure to avoid the need (e.g. collect all rows unconditionally and rely on idempotent writes):</p>
+<pre><code>;; Idempotent write approach — process all rows, overwrite is safe
+(prop-vals-by-folder FolderId RowPid RowPv)
+(get-in RowPv ["prop-vals" "content"] Content)
+(= Pair [RowPid Content])
+(fold [] Pair append Pairs)
+;; pass Pairs to a helper that writes unconditionally</code></pre>
+
 <h2>with-table-if (per-solution branching)</h2>
 
 <p><code>with-table-if</code> branches <strong>per solution</strong>. The condition evaluates within the parent solution, and each branch creates its own table solution.</p>
