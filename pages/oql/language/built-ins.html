@@ -13,6 +13,7 @@
   <tr><td><code>string-take</code> / <code>string-substr</code> / <code>substring</code></td><td>None exist.</td><td>The string toolkit is exactly: <code>string-split</code>, <code>string-concat</code> (binary), <code>string-contains</code>, <code>string-replace</code>, <code>re-find</code>, <code>json-stringify</code>. Slicing by index is not supported.</td></tr>
   <tr><td><code>keys</code></td><td>Does not exist.</td><td>Use the K-binding-then-fold idiom: <code>(get Map K _) (fold [] K append KeysList)</code>.</td></tr>
   <tr><td><code>assoc</code> (as a fold reducer)</td><td>Does not exist.</td><td>When folding into a map, use <code>append</code> with key-value pair entries: <code>(= Entry [El El]) (fold {} Entry append Set)</code>.</td></tr>
+  <tr><td><code>null</code> / <code>nil</code></td><td>Neither exists as a literal.</td><td>OQL has no null literal. For an empty-map sentinel use <code>(= Result {})</code>. For a scalar "no value" sentinel use a string such as <code>(= Result "none")</code>. Writing <code>(= Result null)</code> fails at runtime with no clear error message. For nullable gets, use <code>if</code> (always produces exactly one solution regardless of condition cardinality) rather than <code>with-table-if</code>.</td></tr>
 </table>
 
 <h2>Core</h2>
