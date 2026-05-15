@@ -1,0 +1,101 @@
+<h1>OmegaDB Core Type Shapes</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p>This page documents the exact stored field shapes for the five core OmegaDB types: Component, Protocol, Implementation, Package, and Page. Use this reference when writing OQL that reads from or writes to these types. Field names are case-sensitive JSON string keys.</p>
+
+<h2>How to read this page</h2>
+<p>Each type section shows (1) the datastore functor definition from source, (2) the canonical stored body shape, and (3) notes on which fields agents commonly misread. The body map is what you get back from a lookup clause — e.g. <code>(Qo.Comp/component AppId CompId Comp)</code> binds <code>Comp</code> to the body map.</p>
+
+<h2>Component</h2>
+<p><strong>Source:</strong> <code>query-omega-oql/oql/app/component.oql</code>, <code>query-omega-api/oql/app/public/oql-api/component.oql</code></p>
+<p><strong>Datastore:</strong> <code>Qo.Data.Comp</code> (<code>omega/query-omega/data/component</code>), functor <code>comp(AppId, CompId, Comp)</code>, primary key <code>CompId</code>.</p>
+<p><strong>Lookup:</strong> <code>(Qo.Comp/component AppId CompId Comp)</code></p>
+<p><strong>Stored body (<code>Comp</code>):</strong></p>
+<pre>
+{
+  "type"         : "omega/query-omega/component/Component",
+  "name"         : &lt;string&gt;,
+  "app-id"       : &lt;uuid string&gt;,
+  "page-id"      : &lt;uuid string&gt;,
+  "component-id" : &lt;uuid string&gt;
+}
+</pre>
+<p><strong>Note:</strong> <code>page-id</code> here is the page the component was created on (its "home" page). Components do not have an <code>implementation-id</code> field — implementations are separate objects linked by <code>component-id</code>. Components may also carry an optional <code>description</code> field written by <code>update-description!</code>.</p>
+
+<h2>Protocol</h2>
+<p><strong>Source:</strong> <code>query-omega-oql/oql/app/protocol.oql</code>, <code>query-omega-api/oql/app/public/oql-api/protocol.oql</code></p>
+<p><strong>Datastore:</strong> <code>Qo.Data.Proto</code> (<code>omega/query-omega/data/protocol</code>), functor <code>proto(AppId, ProtoId, Proto)</code>, primary key <code>ProtoId</code>.</p>
+<p><strong>Lookup:</strong> <code>(Qo.Proto/protocol AppId ProtoId Proto)</code></p>
+<p><strong>Stored body (<code>Proto</code>):</strong></p>
+<pre>
+{
+  "type"        : "omega/query-omega/protocol/Protocol",
+  "name"        : &lt;string&gt;,
+  "app-id"      : &lt;uuid string&gt;,
+  "page-id"     : &lt;uuid string&gt;,
+  "protocol-id" : &lt;uuid string&gt;,
+  "spec"        : &lt;map — protocol argument spec&gt;
+}
+</pre>
+<p><strong>Note:</strong> <code>page-id</code> is the page the protocol was created on. <code>spec</code> is the protocol argument specification map passed at creation time via <code>add-or-get-by-name!</code>.</p>
+
+<h2>Implementation</h2>
+<p><strong>Source:</strong> <code>query-omega-oql/oql/app/implementation.oql</code>, <code>query-omega-api/oql/app/public/oql-api/implementation/implementation.oql</code></p>
+<p><strong>Datastore:</strong> <code>Qo.Data.Impl</code> (<code>omega/query-omega/data/implementation</code>), functor <code>impl(AppId, ImplId, CompId, ProtocolId, Impl)</code>, primary key <code>ImplId</code>.</p>
+<p><strong>Lookup:</strong> <code>(Qo.Impl/implementation AppId ImplId CompId ProtoId Impl)</code></p>
+<p><strong>Stored body (<code>Impl</code>):</strong></p>
+<pre>
+{
+  "type"              : "omega/query-omega/implementation/Implementation",
+  "app-id"            : &lt;uuid string&gt;,
+  "code"              : &lt;string — OQL source text or other language source&gt;,
+  "language"          : &lt;string — e.g. "oql"&gt;,
+  "component-id"      : &lt;uuid string&gt;,
+  "protocol-id"       : &lt;uuid string&gt;,
+  "implementation-id" : &lt;uuid string&gt;
+}
+</pre>
+<p><strong>Critical note: Implementation does NOT have a <code>page-id</code> field.</strong> Implementations are linked to a page indirectly through their component and through the page-block that references the implementation-id. Attempting to read <code>(get Impl "page-id" PageId)</code> will fail silently (no solutions). To find the page for an implementation, look up the page-block with the matching <code>implementation-id</code> using <code>(Qo.Page.Bl/page-block _ PageId _ Block)</code> and <code>(get Block "implementation-id" ImplId)</code>.</p>
+<p>A second stored type, ImplementationClauses (<code>Qo.Data.Impl.Clauses</code>), holds parsed clause data separately: <code>{"type": "omega/query-omega/implementation/ImplementationClauses", "implementation-id": ..., "clauses": [...]}</code>. It is read/written independently from the main Impl body.</p>
+
+<h2>Package</h2>
+<p><strong>Source:</strong> <code>query-omega-oql/oql/app/package.oql</code>, <code>query-omega-api/oql/app/public/api/package.oql</code></p>
+<p><strong>Datastore:</strong> <code>Qo.Data.Pkg</code> (<code>omega/query-omega/data/package</code>), functor <code>package(AppId, PackageId, Package)</code>, primary key <code>PackageId</code>.</p>
+<p><strong>Lookup:</strong> <code>(Qo.Pkg/package AppId PackageId Package)</code></p>
+<p><strong>Stored body (<code>Package</code>):</strong></p>
+<pre>
+{
+  "name"       : &lt;string&gt;,
+  "app-id"     : &lt;uuid string&gt;,
+  "package-id" : &lt;uuid string&gt;,
+  "page-id"    : &lt;uuid string&gt;
+}
+</pre>
+<p><strong>Note:</strong> <code>page-id</code> is the page on which the package was created. The <code>get-package!</code> API also injects a virtual <code>"docs-page-id"</code> field from the PackageDocs table when present (falls back to <code>"none"</code>), but this field is not stored in the Package body itself.</p>
+<p>Related types: <code>component-package</code> (links a component to a package, keyed by <code>[CompId, PackageId]</code>) and <code>package-install</code> (records an installation in an app, keyed by <code>[AppId, PackageId]</code>). Neither is part of the core Package body.</p>
+
+<h2>Page</h2>
+<p><strong>Source:</strong> <code>query-omega-oql/oql/app/page.oql</code>, <code>query-omega-api/oql/app/public/api/page.oql</code></p>
+<p><strong>Datastore:</strong> <code>Qo.Data.Page.Data</code> (<code>omega/query-omega/data/page</code>), functor <code>page(AppId, FolderId, PageId, Page)</code>, primary key <code>PageId</code>.</p>
+<p><strong>Lookup:</strong> <code>(Qo.Page/page-object AppId FolderId PageId Page)</code> — or <code>(Qo.Page/page AppId FolderId PageId PageData)</code> for the raw page-data only.</p>
+<p><strong>Stored body (<code>Page</code>):</strong></p>
+<pre>
+{
+  "type"      : "omega/query-omega/page/Page",
+  "app-id"    : &lt;uuid string&gt;,
+  "folder-id" : &lt;uuid string — parent page's page-id, or root folder id&gt;,
+  "page-id"   : &lt;uuid string&gt;,
+  "page-data" : {
+    "name"   : &lt;string&gt;,
+    "blocks" : &lt;array — present for content pages; absent for database pages&gt;
+               OR
+    "is-database" : "true"
+  }
+}
+</pre>
+<p><strong>Note:</strong> <code>folder-id</code> is the parent container's id — for top-level pages this is the root folder id, for nested pages it is the parent page's <code>page-id</code>. The <code>page-data.blocks</code> array holds inline block content for legacy/content pages. Database pages use <code>"is-database": "true"</code> instead. The <code>page-lookup!</code> helper additionally injects <code>"component-id"</code> from the page-component join, but this is computed, not stored in the Page row.</p>
+
+<h2>Defterm storage layout</h2>
+<p>All five types use the same CouchDB defterm pattern: the body map is stored as <code>args[N]</code> in the underlying document where N is the last positional argument. The preceding args (AppId, FolderId, etc.) are stored as <code>args[0]</code>, <code>args[1]</code>, etc. and form the basis for write-index design docs. When writing Mango queries directly against these datastores, use <code>"args.N.field-name"</code> selector syntax — e.g. <code>"args.2.name"</code> for component name search.</p>
