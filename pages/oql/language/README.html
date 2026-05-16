@@ -12,6 +12,7 @@
   <li><a href="built-ins">Built-in Terms</a> — Core terms, arithmetic, map operations, array operations, string operations, HTTP, symbols-in-literal-arguments rule, and deprecated http-get/post/delete terms.</li>
   <li><a href="reducers">Reducers</a> — fold, with-unique-by, with-order-by, with-group-by, with-count, with-limit, with-skip, with-sort, and all fold pitfall patterns.</li>
   <li><a href="query-execution">Query Execution</a> — Index selection strategies (defterm PK, write-index exact/prefix, Mango fallback), operator push-down per strategy, the Mango silent-ignore gotcha for with-skip/with-limit, and the mango-query built-in with its mandatory enable-full-scan/disable-full-scan bookend requirement.</li>
+  <li><a href="s-expression-evaluation">S-Expression Evaluation Model</a> — Why S-expressions extend solution bindings rather than produce inline values, why map literals require pre-bound symbols (not nested term calls), and why terms like <code>uuid</code> must be wrapped in <code>run-term</code> for per-row execution.</li>
 </ul>
 
 <h2>Not here</h2>

@@ -1,0 +1,63 @@
+<h1>S-Expression Evaluation Model</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>The core rule: S-expressions extend solution bindings</h2>
+
+<p>OQL S-expressions do <strong>not</strong> produce values that can be used inline at the call site. Every S-expression <strong>extends the current solution set</strong> by adding new symbol bindings. A term's output is a new symbol in scope — never an inline expression result.</p>
+
+<p>This is the fundamental difference from Clojure, Lisp, or any value-expression language. In those languages, <code>(get map "key")</code> returns a value you can embed directly. In OQL, <code>(get Map "key" Result)</code> binds the symbol <code>Result</code> into the current solution row. The term succeeds or fails — it does not "return" anything.</p>
+
+<h2>Consequence 1: map literals require pre-bound symbols</h2>
+
+<p>Map literals in OQL accept only already-bound symbols as values. You cannot call a term inline inside a map literal <code>{}</code>.</p>
+
+<pre><code>;; WRONG — silently produces an unbound value for "page-id"
+{"page-id" (get Page "page-id") "name" Name}
+
+;; CORRECT — bind first, then use the symbol
+(get Page "page-id" PageId)
+{"page-id" PageId "name" Name}</code></pre>
+
+<p>The wrong form does not throw an error — it silently produces an unbound value for that key. The map literal syntax does not evaluate nested S-expressions; it reads already-bound symbols only. The same rule applies to any nested data structure: map literals, vector literals, and argument positions in other terms all require pre-bound symbols, not inline term calls.</p>
+
+<h2>Consequence 2: terms run once per clause entry, shared across all solution rows</h2>
+
+<p>When a term appears at the top level of a clause body, it runs once when the clause is entered. Its result binding is shared across every solution row that flows through the clause. For terms that produce a stable value (like <code>(get Map "key" Val)</code> on a single bound row) this is fine. For terms that generate fresh values on each call — like <code>uuid</code> — this causes a single value to be reused across all rows.</p>
+
+<pre><code>;; WRONG — one UUID shared across all rows → KEY_UPDATE_CONFLICT
+(uuid BlockId)
+(write-table SomeTableId
+  [{"block-id" BlockId "content" Content}]
+  _)</code></pre>
+
+<p>In the wrong form, every row in the write batch gets the same <code>BlockId</code> because <code>uuid</code> ran once, extended the solution with one binding, and that binding is reused for every row.</p>
+
+<p>Fix: use <code>run-term</code> to execute a helper once per solution row. <code>run-term</code> creates a fresh solution partition for each row, so <code>uuid</code> runs independently for each:</p>
+
+<pre><code>;; CORRECT — uuid called once per row via run-term
+(:- (BuildBlockRow Content BlockId)
+    (uuid BlockId))
+
+(run-term BuildBlockRow Content BlockId)
+(write-table SomeTableId
+  [{"block-id" BlockId "content" Content}]
+  _)</code></pre>
+
+<h2>The mental model</h2>
+
+<p>Think of OQL clause execution as a pipeline of solution tables (see <a href="../concepts/oql-execution-as-sql-joins">OQL Execution as SQL Joins</a>). Each term is a JOIN operation against the current solution table. The JOIN adds new columns (new symbol bindings) and may filter rows. It never "returns" a value — it transforms the table.</p>
+
+<p>Map literals, vector literals, and term arguments read from the current solution table's columns. They cannot trigger a JOIN mid-expression. Any computation that produces a new binding must be a separate S-expression (a separate JOIN step) before the literal that reads it.</p>
+
+<h2>Symbols-in-literal-arguments rule</h2>
+
+<p>The same principle applies everywhere, not just map literals. For the canonical statement and more examples of valid vs invalid argument positions, see <a href="built-ins">Built-in Terms — Symbols in Literal Arguments</a>.</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="built-ins">Built-in Terms</a> — symbols-in-literal-arguments rule, <code>uuid</code>, <code>throw</code> with pre-bound maps</li>
+  <li><a href="../concepts/oql-execution-as-sql-joins">OQL Execution as SQL Joins</a> — why each term is a JOIN and how solution tables grow</li>
+  <li><a href="../guides/debug-triage">Debug Triage</a> — how to diagnose silent unbound values and KEY_UPDATE_CONFLICT errors</li>
+</ul>
