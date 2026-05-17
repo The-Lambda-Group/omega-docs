@@ -1,0 +1,55 @@
+<h1>add-functors: 03-vec on Local Instances</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<p><code>oql/queries/add-functors/03-vec.oql</code> registers functor mappings for the vec (vector) datastore family. On local development instances that do not have a vec datastore configured, this file throws a <code>WRITING_SYMBOLS</code> error and does not complete. This doc records the observed behavior and the safe-to-skip conclusion for non-vec work.</p>
+
+<h2>What happens</h2>
+
+<p>Running <code>omega-cli run-query oql/queries/add-functors/03-vec.oql</code> on a local instance without a configured vec datastore produces an error of the form:</p>
+
+<pre><code>WRITING_SYMBOLS ["CompVecKey", "_"]</code></pre>
+
+<p>The file invokes <code>Qo.Vec.Comp/add-functors</code> (among others). When the vec datastore is absent, the symbol <code>VectorToCompFunc</code> remains unbound inside that clause, and the engine surfaces a <code>WRITING_SYMBOLS</code> error rather than completing normally.</p>
+
+<p><strong>The other eight add-functors files</strong> (<code>00-tbl.oql</code> through <code>02-dl.oql</code> and <code>04-page-bl.oql</code> through <code>08-run.oql</code>) do not reference the vec datastores and succeed on the same local instance.</p>
+
+<h2>Root cause</h2>
+
+<p><strong>Observed behavior only — root cause not fully confirmed.</strong> No minimal reproduction case has been established. The most likely explanation is that <code>Qo.Vec.Comp/add-functors</code> requires at least one vec datastore document to be populated before it can resolve <code>VectorToCompFunc</code>, and on a fresh local instance that document does not exist. The engine then fails when it tries to write functor symbols against an unresolved binding.</p>
+
+<p>This is not a confirmed engine bug. It may be expected behavior for a feature that requires optional infrastructure (the vec datastore) which is not present in all local setups.</p>
+
+<h2>Is it safe to skip?</h2>
+
+<p>Yes, for any OQL work that does not involve vec functionality. Confirmed by grep: <code>data-source/view.oql</code> — the primary data-source query — has zero dependencies on any <code>Qo.Vec.*</code> namespace. Work on queries, data sources, tables, pages, implementations, or workflows that do not touch vec is unaffected by 03-vec's failure.</p>
+
+<p>If your task is non-vec OQL work, skip 03-vec and run the remaining eight files. The add-functors sequence is not strictly ordered; 03-vec can be omitted without affecting the others.</p>
+
+<h2>When does 03-vec need to succeed?</h2>
+
+<p>03-vec must succeed when:</p>
+
+<ul>
+  <li>You are developing or debugging vec-related functionality (<code>Qo.Vec.*</code> namespaces).</li>
+  <li>You are verifying a full add-functors pass against a production-like local instance that has a vec datastore configured.</li>
+  <li>CI or a deployment pipeline requires all add-functors files to pass.</li>
+</ul>
+
+<p>In these cases, you need a local instance with the vec datastore populated. <strong>Unknown:</strong> the exact setup steps to populate the vec datastore locally are not documented here — consult the vec-related OQL source or the platform team.</p>
+
+<h2>Quick reference</h2>
+
+<table>
+  <tr><th>File</th><th>Vec dependency?</th><th>Safe to skip on local (no vec)?</th></tr>
+  <tr><td>00-tbl.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>01-app.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>02-dl.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td><strong>03-vec.oql</strong></td><td><strong>Yes</strong></td><td><strong>Yes, for non-vec work</strong></td></tr>
+  <tr><td>04-page-bl.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>05-ds.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>06-wr.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>07-mv.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+  <tr><td>08-run.oql</td><td>No</td><td>N/A — runs fine</td></tr>
+</table>
