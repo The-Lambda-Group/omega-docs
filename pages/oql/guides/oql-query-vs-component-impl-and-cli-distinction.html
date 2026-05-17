@@ -1,0 +1,117 @@
+<h1>OQL Queries vs Component Implementations, and the Two CLIs</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>The recurring confusion</h2>
+
+<p>Agents and developers working in the Omega ecosystem frequently make two related mistakes:</p>
+
+<ol>
+  <li>Treating any <code>.oql</code> file as a "component implementation" and trying to deploy it with <code>qo push</code>.</li>
+  <li>Using <code>qo</code> when the task requires <code>omega-cli</code>, or vice versa.</li>
+</ol>
+
+<p>This doc draws the line clearly. Read it before writing any plan or task that involves deploying OQL code.</p>
+
+<h2>Two kinds of OQL artifact</h2>
+
+<h3>OQL queries — scratch queries and library clauses (<code>.oql</code> files)</h3>
+
+<p>An OQL query is a <code>.oql</code> file containing OQL clause definitions (<code>:-</code> heads and bodies). The canonical examples are:</p>
+
+<ul>
+  <li><strong>Scratch queries</strong> — one-off queries in <code>oql/scratch/</code>, gitignored, used for probing, backfill, or migration. They end with <code>(return [Result])</code>.</li>
+  <li><strong>Library queries</strong> — reusable clause definitions in <code>oql/queries/</code> (e.g. <code>oql/queries/add-functors/00-tbl.oql</code>). They define named clauses that other queries can call.</li>
+</ul>
+
+<p><strong>How they are deployed:</strong> via <code>omega-cli run-query &lt;file.oql&gt;</code>. Running a <code>.oql</code> file is a live query execution against omega-db. The side effects of that execution (e.g. writing clause definitions to the database) persist. There is no separate "upload" step — running the query IS the deployment.</p>
+
+<p><strong><code>qo push</code> does NOT work for <code>.oql</code> files.</strong> <code>qo push</code> expects a JS component implementation with an <code>impl/index.json</code> index. Pointing it at a <code>.oql</code> file will fail or produce incorrect behavior.</p>
+
+<h3>OQL component implementations (JS files, not <code>.oql</code>)</h3>
+
+<p>A component implementation is a JavaScript file produced by <code>qo pull</code>. It contains an embedded OQL script (stored as a string literal) alongside a metadata index (<code>impl/index.json</code>). The OQL inside the impl file is executed at runtime by the Omega engine when the component is invoked — it is not executed at deploy time.</p>
+
+<p><strong>How they are deployed:</strong> via <code>qo push [impl-file]</code>. <code>qo push</code> reads <code>impl/index.json</code>, finds the component-id and impl-id, and uploads the JS implementation to the workspace. The OQL inside is not run at push time — it is stored for later runtime execution.</p>
+
+<p><strong>Key distinction:</strong> A component implementation file <em>uses</em> OQL internally, but it is not an OQL file. It is a JS file. Running <code>omega-cli run-query</code> on a JS impl file would fail — that command expects a <code>.oql</code> file.</p>
+
+<h2>The two CLIs</h2>
+
+<h3><code>omega-cli</code> — database and library access</h3>
+
+<p>Binary: <code>omega-cli</code></p>
+
+<p>This CLI provides direct access to omega-db. The primary OQL-relevant command is:</p>
+
+<ul>
+  <li><code>omega-cli run-query &lt;file.oql&gt;</code> — executes an OQL file as a live query against omega-db. Use this to deploy library clauses, run scratch queries, and execute backfill/migration queries.</li>
+</ul>
+
+<p><code>omega-cli</code> is the lower-level tool. It talks directly to the database and is the correct tool for any task involving <code>.oql</code> files.</p>
+
+<h3><code>qo</code> (query-omega-cli) — application-layer operations</h3>
+
+<p>Binary: <code>qo</code></p>
+
+<p>This CLI manages application-layer Omega objects: pages, components, implementations, and packages. Key commands relevant to OQL development:</p>
+
+<ul>
+  <li><code>qo pull [component-path]</code> — downloads a component implementation from the workspace into a local JS file with <code>impl/index.json</code>.</li>
+  <li><code>qo push [impl-file]</code> — uploads a JS component implementation to the workspace. Requires <code>impl/index.json</code>. Does NOT accept <code>.oql</code> files.</li>
+  <li><code>qo run &lt;query-path&gt; -p &lt;page&gt; -m run -a '[{...}]'</code> — runs a named query from a workspace page.</li>
+  <li><code>qo doc push &lt;pages-dir&gt; "Docs/Section"</code> — syncs HTML docs to the OmegaAI workspace.</li>
+</ul>
+
+<p><code>qo</code> is the higher-level tool. It knows about workspace structure, page hierarchies, and component lifecycles. It does NOT know about raw <code>.oql</code> files.</p>
+
+<h2>Decision table</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Task</th>
+      <th>Correct tool</th>
+      <th>Wrong tool</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Deploy a library clause (<code>.oql</code> file)</td>
+      <td><code>omega-cli run-query file.oql</code></td>
+      <td><code>qo push</code> — will fail</td>
+    </tr>
+    <tr>
+      <td>Run a scratch query</td>
+      <td><code>omega-cli run-query scratch/query.oql</code></td>
+      <td><code>qo run</code> — wrong API surface</td>
+    </tr>
+    <tr>
+      <td>Push a JS component implementation</td>
+      <td><code>qo push impl/index.json</code></td>
+      <td><code>omega-cli run-query</code> — wrong file type</td>
+    </tr>
+    <tr>
+      <td>Pull a component from the workspace</td>
+      <td><code>qo pull &lt;path&gt;</code></td>
+      <td>n/a</td>
+    </tr>
+    <tr>
+      <td>Run a named workspace query</td>
+      <td><code>qo run &lt;page/query&gt; ...</code></td>
+      <td><code>omega-cli run-query</code> — different concept</td>
+    </tr>
+    <tr>
+      <td>Sync HTML docs to workspace</td>
+      <td><code>qo doc push pages/oql "Docs/OQL-Public"</code></td>
+      <td>n/a</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The lifecycle in one sentence per artifact type</h2>
+
+<p><strong>OQL library clause:</strong> Write a <code>.oql</code> file → <code>omega-cli run-query file.oql</code> → clause definitions stored in omega-db → callable by any subsequent OQL query.</p>
+
+<p><strong>OQL component implementation:</strong> <code>qo pull &lt;path&gt;</code> → edit the embedded OQL string in the JS file → <code>qo push impl/index.json</code> → new OQL stored as component impl → executed at runtime when the component is invoked.</p>
