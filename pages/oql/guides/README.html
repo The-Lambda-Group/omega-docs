@@ -7,13 +7,9 @@
 
 <h2>Contents</h2>
 <ul>
-  <li><a href="develop-oql">Develop OQL</a> — The REPL-driven authoring and triage manual. Operating rules, the inspect-by-mutating-Result mechanic, the push-run loop, and both the forward (authoring) and backward (debugging) directions of the same loop.</li>
-  <li><a href="debug-triage">Debug &amp; Triage</a> — Minimum reproduction discipline, narrowing an OQL failure by stripping the frame, triaging full-scan and no-return errors, returning early to inspect intermediate state, and the check-data-table-integrity procedure.</li>
-  <li><a href="scratch-queries">Scratch Queries</a> — How to write scratch queries that always end with <code>(return [Result])</code>, what scratch files can and cannot do (read-only), and the count-rows-in-a-defterm CouchDB doc_count recipe.</li>
-  <li><a href="deployment">Deployment</a> — Library-side vs installed-side components, deploying a fix to a running installed component, testing at realistic batch sizes, and the Thompson-sampling allocation step verification pattern.</li>
-  <li><a href="data-operations">Data Operations</a> — Drop rows with forced unification failure, handle HTTP 422 responses in status dispatch, and the code-step pagination pattern for multi-batch coordinator firings.</li>
-  <li><a href="oql-query-vs-component-impl-and-cli-distinction">OQL Queries vs Component Implementations</a> — The critical distinction between <code>.oql</code> library files (deployed via <code>omega-cli run-query</code>) and JS component implementations (deployed via <code>qo push</code>), and when to use <code>omega-cli</code> vs <code>qo</code>.</li>
-  <li><a href="add-functors-vec-local">add-functors: 03-vec on Local Instances</a> — Why 03-vec.oql throws WRITING_SYMBOLS on local instances without a vec datastore, whether root cause is confirmed (it is not), and when it is safe to skip the file for non-vec OQL work.</li>
+  <li><a href="authoring">Authoring</a> — The REPL-driven authoring loop, scratch query discipline, and the .oql vs JS component distinction. Start here before writing any OQL.</li>
+  <li><a href="debugging">Debugging</a> — Minimum reproduction discipline, narrowing failures by stripping the frame, and known edge cases on local development instances.</li>
+  <li><a href="operations">Operations</a> — Deploying library-side and installed-side components, handling live data with drop and pagination patterns, and testing at realistic batch sizes.</li>
 </ul>
 
 <h2>Not here</h2>

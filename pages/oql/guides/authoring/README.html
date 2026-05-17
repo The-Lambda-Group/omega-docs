@@ -1,0 +1,16 @@
+<h1>OQL Guides — Authoring</h1>
+
+<p>Docs for writing OQL: the REPL-driven authoring loop, scratch query discipline, and the critical distinction between .oql library files and JS component implementations. Read develop-oql first — it is the foundation every OQL author must internalize before anything else.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="develop-oql">Develop OQL</a> — The REPL-driven authoring and triage manual. Operating rules, the inspect-by-mutating-Result mechanic, the push-run loop, and both the forward (authoring) and backward (debugging) directions of the same loop.</li>
+  <li><a href="scratch-queries">Scratch Queries</a> — How to write scratch queries that always end with <code>(return [Result])</code>, what scratch files can and cannot do (read-only), and the count-rows-in-a-defterm CouchDB doc_count recipe.</li>
+  <li><a href="oql-query-vs-component-impl-and-cli-distinction">OQL Queries vs Component Implementations</a> — The critical distinction between <code>.oql</code> library files (deployed via <code>omega-cli run-query</code>) and JS component implementations (deployed via <code>qo push</code>), and when to use <code>omega-cli</code> vs <code>qo</code>.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>For debugging OQL failures, see <a href="../debugging">Debugging</a>. For deployment and data operations, see <a href="../operations">Operations</a>. For the full guides index, see <a href="..">Guides</a>.</p>
