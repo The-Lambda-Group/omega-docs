@@ -3,6 +3,37 @@
 <h2>Visibility</h2>
 <p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
 
+<h2>Localhost-first rule</h2>
+
+<p><strong>All OQL changes must be verified on localhost before any production deploy. Never deploy directly to production.</strong></p>
+
+<p>Production deploy requires three gates, in order:</p>
+
+<ol>
+  <li><strong>Localhost verification passes.</strong> Run the changed OQL against a local instance and confirm the output is correct. "It pushed without error" is not verification — confirm the actual query output.</li>
+  <li><strong>User code review.</strong> The implementer shows the diff to the user (or another reviewer) and the reviewer reads it.</li>
+  <li><strong>Explicit verbal authorization.</strong> The user says "merge", "push", or "deploy" — a word that names the action. Vague confirmation such as "looks good", "LGTM", or "that seems right" does NOT constitute authorization to deploy to production. If in doubt, ask explicitly: "Should I deploy this to production?"</li>
+</ol>
+
+<p>Skipping gate 1 (localhost verification) caused a production regression in May 2026: <code>view.oql</code> was deployed without localhost verification, causing all views to return wrong data. The incident is the origin of this rule.</p>
+
+<h2>Rollback procedure</h2>
+
+<p>If a deploy breaks production, roll back by re-running the last-known-good <code>.oql</code> file from the production branch:</p>
+
+<pre><code>omega-cli run-query -h https://db.queryomega.com &lt;file&gt;</code></pre>
+
+<p>This overwrites the broken clause definitions stored in omega-db with the versions from the file. The file on the production branch is the source of truth for what should be deployed. Steps:</p>
+
+<ol>
+  <li>Switch to (or confirm you are on) the production branch: <code>git checkout production</code>.</li>
+  <li>Identify the <code>.oql</code> file whose clauses are broken.</li>
+  <li>Run: <code>omega-cli run-query -h https://db.queryomega.com &lt;path/to/file.oql&gt;</code></li>
+  <li>Verify the fix: run a scratch query or reload the affected view and confirm output is correct.</li>
+</ol>
+
+<p><strong>Note:</strong> This replaces ALL clause definitions in the file, not just the broken one. Ensure the production branch file is in the intended good state before running the rollback.</p>
+
 <h2>Library-side vs installed-side</h2>
 
 <p>Every component exists in two places in the workspace:</p>
