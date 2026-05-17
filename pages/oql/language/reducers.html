@@ -169,14 +169,36 @@
 
 <p><strong>Restrict the inner term to a single call.</strong> <code>with-count</code> over a compound condition — <code>(with-count Cnt (and Term1 Term2))</code> — currently fails with a NullPointerException. Wrap the compound logic in an in-memory clause and count over the clause invocation instead.</p>
 
-<p><strong>Three known NPE patterns:</strong></p>
+<p><strong>Four known NPE patterns:</strong></p>
 <ul>
   <li>sec-index with trailing wildcard</li>
   <li>compound <code>(and ...)</code> predicate</li>
   <li>captured helper containing <code>prop-vals-by-folder</code></li>
+  <li>clause wrapper — any clause that internally delegates to a raw defterm (see below)</li>
 </ul>
 
 <p>For any of these, use the fold-append-per-row-unique-symbol + length pattern documented above.</p>
+
+<h3>with-count on clause wrappers vs raw defterm terms</h3>
+
+<p><code>with-count</code> only works on <strong>raw defterm terms</strong>. Calling it on a clause wrapper that delegates internally to a defterm produces <code>omega/jvm/NullPointerException</code>.</p>
+
+<p>A <strong>clause wrapper</strong> is a stored clause that calls a raw defterm in its body, often to add filtering, transformation, or a public API surface. For example:</p>
+
+<pre><code>(:- (Qo.Db.Prop/sec-index! ...)
+    (Qo.Data.Db.Prop.SecIndex/sec-index ...))</code></pre>
+
+<p><code>Qo.Db.Prop/sec-index</code> is a clause wrapper. Its body calls <code>Qo.Data.Db.Prop.SecIndex/sec-index</code>, which is the raw defterm. <code>with-count</code> on the wrapper NPEs; <code>with-count</code> on the raw defterm works correctly:</p>
+
+<pre><code>;; BAD — NPEs with omega/jvm/NullPointerException
+(with-count N (Qo.Db.Prop/sec-index FolderId "name" "value" _))
+
+;; GOOD — raw defterm works correctly; confirmed with N = 300097
+(with-count N (Qo.Data.Db.Prop.SecIndex/sec-index FolderId _ _ _))</code></pre>
+
+<p><strong>How to find the raw defterm for a clause wrapper:</strong> search the OQL source for the relevant datastore for <code>(defterm Namespace {"name" "term-name" ...})</code>. The defterm's namespace is the callable term. As a naming convention, raw defterm namespaces often include <code>.Data.</code> in the path (e.g. <code>Qo.Data.Db.Prop.SecIndex</code>) while clause wrappers use a shorter public-API namespace (e.g. <code>Qo.Db.Prop</code>).</p>
+
+<p>This pattern also extends to terms accessed through <code>page-ds</code>. When <code>page-ds</code> returns the actual datastore and the body clause calls the raw defterm directly (e.g. <code>PageDs/page</code>), <code>with-count</code> works correctly — because <code>page-ds</code> resolves to the underlying raw defterm, not a clause wrapper.</p>
 
 <h2>Performance: partitions and run-term</h2>
 
