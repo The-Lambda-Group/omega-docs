@@ -40,19 +40,6 @@
 
 <p>In-memory clauses are used for helper logic inside an implementation, implementation clauses registered with <code>set-implementation-clauses</code>, and captured clauses passed into stored clauses via the capture mechanism.</p>
 
-<h3>The clause term syntax</h3>
-<p><code>clause</code> is an alternative way to define an in-memory clause. Instead of <code>(:- (Name Args...) body...)</code>, you write:</p>
-
-<pre><code>(clause ParseValue [Raw Parsed]
-    (with-table-if (= Raw "")
-      [Raw Parsed]
-      (= Parsed 0)
-      (json-stringify Parsed Raw)))
-
-(call ParseValue "100" Result)   ;; Result = 100</code></pre>
-
-<p>The key difference: the <code>clause</code> form takes arguments as a vector <code>[Arg1 Arg2]</code> rather than as part of the head <code>(Name Arg1 Arg2)</code>. Both forms produce in-memory clauses invoked with <code>call</code>.</p>
-
 <h3>Inner clauses (experimental)</h3>
 <p>You can define an in-memory clause inside another clause's body. It is scoped to that execution. <strong>Warning:</strong> inner clauses are highly experimental. Stored clause writes inside inner clauses do not persist. Only use inner in-memory clauses for helper logic within a single query execution.</p>
 
@@ -200,6 +187,32 @@ No implementation of method: :run-with-args ... found for class: clojure.lang.Sy
 </ol>
 
 <p>Treat a temptation to violate any of these as a sign that you are solving the wrong problem.</p>
+
+<h2>Semi-symbolic map arguments</h2>
+
+<p>A <strong>semi-symbolic map</strong> is a map literal whose values include unbound symbols at the call site — for example <code>{"key" X}</code> where <code>X</code> is bound only at runtime. Support for semi-symbolic maps varies by call context.</p>
+
+<h3>In-memory clause calls via <code>call</code> — fully supported</h3>
+<p>Passing a semi-symbolic map directly to <code>call</code> works when the symbol is bound at call time:</p>
+
+<pre><code>(call Clause {"key" X} Out)</code></pre>
+
+<p>The workaround of pre-binding the map — <code>(= M {"key" X}) (call Clause M Out)</code> — is still valid but is no longer required.</p>
+
+<h3>Stored clause calls where the body uses <code>get</code> — supported</h3>
+<p>Inside a stored clause body, the <code>get</code> built-in resolves symbol values out of map literals. If the body receives a map argument and extracts fields with <code>get</code>, semi-symbolic maps passed in from the caller work correctly because <code>get</code> performs the resolution at runtime against the current bindings.</p>
+
+<h3>Defterm fact terms — not supported for index selection</h3>
+<p>Defterm fact terms (e.g. <code>T/item</code>) require fully-resolved scalar arguments for index selection. Passing an unbound symbol as a key field fails with a no-matching-index error:</p>
+
+<pre><code>;; FAILS — PageId is unbound; the index cannot be selected
+(T/item {"id" PageId} Out)
+
+;; CORRECT — bind the scalar first, then call
+(= PageId "some-page-id")
+(T/item {"id" PageId} Out)</code></pre>
+
+<p>This is intended behavior. The engine must pick an index before executing the scan, which requires concrete scalar values for every indexed field.</p>
 
 <h2>Related</h2>
 <p>For the foundational explanation of why S-expressions extend solution bindings rather than produce inline values — and why this means map literals require pre-bound symbols — see <a href="s-expression-evaluation">S-Expression Evaluation Model</a>.</p>
