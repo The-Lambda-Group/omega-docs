@@ -162,22 +162,30 @@
 
 <p>Inside a <code>with-table-if</code> branch body:</p>
 <ol>
-  <li>Only symbols listed in the schema <code>[A B Result]</code> flow in from the outer scope.</li>
-  <li>Symbols bound in <code>CONDITION</code> do NOT automatically flow into the branch body — include them in the schema OR re-bind inside the body (the check-then-rebind idiom).</li>
-  <li>Symbols bound inside the branch body are local to that branch and do not escape to downstream clauses.</li>
+  <li>The schema <code>[A B Result]</code> declares which symbols are <strong>variable across branches</strong> — these are projected from the outer solution table and joined back after branching. Symbols already bound in the outer solution table <strong>before</strong> the <code>with-table-if</code> are also accessible inside branches without needing to appear in the schema, because they are always present in the parent solution. The schema is not a full visibility whitelist — it is a join key for the branch merge.</li>
+  <li>Symbols bound <strong>in the condition itself</strong> (e.g. <code>Val</code> in <code>(get Data "key" Val)</code>) do NOT automatically flow into the branch body — include them in the schema OR re-bind inside the body (the check-then-rebind idiom). This is because the condition binds symbols in its own scope; those symbols are not yet in the outer solution table when the <code>with-table-if</code> is entered.</li>
+  <li>Symbols bound inside the branch body are local to that branch and do not escape to downstream clauses unless listed in the schema.</li>
 </ol>
 
 <pre><code>;; BAD — Val is bound by the condition but not listed in the schema
 (with-table-if (get Data "key" Val)
   [Data Result]
-  (= Result {"found" Val})       ;; Val is unbound here
+  (= Result {"found" Val})       ;; Val is unbound here — condition-bound symbols need to be in the schema
   (= Result {"found" "default"}))
 
 ;; GOOD — list Val in the schema so it flows into the body
 (with-table-if (get Data "key" Val)
   [Data Val Result]
   (= Result {"found" Val})
-  (= Result {"found" "default"}))</code></pre>
+  (= Result {"found" "default"}))
+
+;; NOTE — OuterVar was bound before this with-table-if and is accessible in both branches
+;; without being listed in the schema (it is in the outer solution table already)
+(= OuterVar "some-value")
+(with-table-if (get Data "key" Val)
+  [Data Val Result]
+  (= Result {"found" Val "outer" OuterVar})   ;; OuterVar accessible — already in outer solution table
+  (= Result {"found" "default" "outer" OuterVar}))</code></pre>
 
 <h3>The Ctx-threading pattern</h3>
 
