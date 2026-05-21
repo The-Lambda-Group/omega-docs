@@ -1,0 +1,77 @@
+<h1>HTTP Hooks</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>What are HTTP hooks?</h2>
+<p>OmegaDB can receive inbound HTTP requests and route them to OQL. Any connector can register an OQL functor as an HTTP handler. OmegaDB issues a stable URL (<code>https://db.queryomega.com/hook/&lt;uuid&gt;</code>) that external services can call. Use cases: OAuth callbacks, Stripe/LinkedIn/GitHub webhooks, and any external-triggered OQL execution.</p>
+
+<h2>Registering a hook</h2>
+<p>Use <code>Qo.Public.Api.HttpEndpoint/register</code> to register a functor as an HTTP handler. Pass the functor; the clause returns a map with the hook <code>"id"</code> and stable <code>"url"</code>.</p>
+
+<pre><code>(datastore MyDs "my/component/handler")
+(functor "my-handler" 2 MyDs HandlerFunc)
+(datastore Ep "omega/query-omega/public/api/http-endpoint")
+(Ep/register HandlerFunc Result)
+(return [Result])</code></pre>
+
+<p>Result shape:</p>
+<pre><code>{"id"  "&lt;uuid&gt;"
+ "url" "https://db.queryomega.com/hook/&lt;uuid&gt;"}</code></pre>
+
+<p>The call site uses <code>register</code> (no bang). The <code>!</code> suffix appears only on the definition side of the deployed handler clause — it is not part of the call.</p>
+
+<h2>Writing a handler</h2>
+<p>The handler clause receives two arguments: <code>Exec</code> (the inbound request map) and <code>Result</code> (the output unification variable).</p>
+
+<p>Exec map shape:</p>
+<pre><code>{"endpoint-id"   "&lt;uuid&gt;"
+ "method"        "GET"
+ "headers"       {"content-type" "application/json"}
+ "query-params"  {"code" "abc123"}
+ "body"          "raw string or nil"}</code></pre>
+
+<p>The handler must unify <code>Result</code> with a response map containing <code>"status"</code> (integer), <code>"headers"</code> (map), and <code>"body"</code> (string).</p>
+
+<p>Required response map shape:</p>
+<pre><code>{"status"  200
+ "headers" {"Content-Type" "text/plain"}
+ "body"    "ok"}</code></pre>
+
+<p>Minimal handler:</p>
+<pre><code>(:- (MyDs/my-handler! Exec Result)
+    (= Result {"status" 200 "body" "ok" "headers" {}}))</code></pre>
+
+<h2>Examples</h2>
+
+<h3>OAuth callback (GET, reads query params)</h3>
+<pre><code>(:- (MyDs/oauth-callback! Exec Result)
+    (get Exec "query-params" Qp)
+    (get Qp "code" Code)
+    ;; exchange Code for tokens, store them
+    (= Result {"status" 302
+               "headers" {"Location" "https://app.queryomega.com/success"}
+               "body" ""}))</code></pre>
+
+<h3>Webhook (POST, reads body)</h3>
+<pre><code>(:- (MyDs/stripe-webhook! Exec Result)
+    (get Exec "body" Body)
+    (json-parse Body Event)
+    ;; process Event
+    (= Result {"status" 200 "body" "received" "headers" {}}))</code></pre>
+
+<h2>Getting the URL</h2>
+<p>Use <code>get-url</code> to retrieve the hook URL by id:</p>
+<pre><code>(Ep/get-url Id Url)
+(return [Url])</code></pre>
+<p>Returns <code>"https://db.queryomega.com/hook/&lt;uuid&gt;"</code>.</p>
+
+<h2>Unregistering a hook</h2>
+<p>Use <code>unregister</code> with the id to remove a hook:</p>
+<pre><code>(= Id "&lt;uuid&gt;")
+(Ep/unregister Id Result)
+(return [Result])</code></pre>
+<p>Returns <code>{"deleted" true}</code>.</p>
+
+<h2>Security note</h2>
+<p>HTTP hooks have no authentication. The UUID provides security through obscurity — do not expose hook URLs in client-side code. Rate limiting and authentication are future work.</p>
