@@ -227,3 +227,26 @@
 (with-sort "desc"
   (with-limit 5
     (Qo.Db.Prop/prop-vals FolderId PageId PropVal)))</code></pre>
+
+<h3>with-limit / with-skip / with-sort are WRAPPING forms, not standalone directives</h3>
+
+<p><code>with-limit</code>, <code>with-skip</code>, and <code>with-sort</code> are <strong>wrapping forms</strong> — the fact term must be <em>nested inside</em> them as the body argument. At runtime, the engine parses each into a record with fields <code>{n, body}</code> (or <code>{direction, body}</code> for <code>with-sort</code>), assocs the parameter into the execution context, runs the entire body under that enriched context, then dissocs the key on return. The key is <strong>not in context</strong> before or after the form.</p>
+
+<p><strong>Correct — fact term nested inside:</strong></p>
+<pre><code>(with-limit 3 (DS/item A B))
+
+(with-skip 20
+  (with-limit 10
+    (DS/item A B)))</code></pre>
+
+<p><strong>Wrong — fact term written as a peer sibling (silent no-op):</strong></p>
+<pre><code>;; BAD: (with-limit 3) closes its scope immediately (empty body).
+;; When (DS/item A B) runs, ::with-limit is NOT in ctx.
+;; _all_docs fetches every document and row-limit gates fire as if
+;; with-limit were never written. No error is raised.
+(with-limit 3)
+(DS/item A B)</code></pre>
+
+<p>This is a <strong>silent correctness bug</strong>: the query returns all rows, not 3. The symptom is typically a too-many-rows result or a timeout, not a thrown exception.</p>
+
+<p><strong>Contrast with genuine peer forms.</strong> <code>(enable-full-scan)</code> and <code>(return [...])</code> are <em>standalone</em> directives — they do not take a body and are correctly written as peers of the fact term. <code>with-limit</code>, <code>with-skip</code>, and <code>with-sort</code> are NOT in that category.</p>
