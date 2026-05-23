@@ -1,0 +1,15 @@
+<h1>Query Execution</h1>
+
+<p>How OQL queries execute and produce results: solution reducers (fold, with-count, with-order-by, etc.) and index-selection strategies (defterm PK, write-index, Mango fallback). Read these when writing queries that aggregate, sort, or must avoid full-scan throws.</p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>Contents</h2>
+<ul>
+  <li><a href="reducers">Reducers</a> — fold, with-unique-by, with-order-by, with-group-by, with-count, with-limit, with-skip, with-sort, and all fold pitfall patterns.</li>
+  <li><a href="query-execution">Query Execution</a> — Index selection strategies (defterm PK, write-index exact/prefix, Mango fallback), operator push-down per strategy, the Mango silent-ignore gotcha for with-skip/with-limit, and the mango-query built-in with its mandatory enable-full-scan/disable-full-scan bookend requirement.</li>
+</ul>
+
+<h2>Not here</h2>
+<p>For clause definition and control flow, see <a href="../core">Core Language Mechanics</a>. For built-in term primitives, see <a href="../terms">Terms</a>.</p>

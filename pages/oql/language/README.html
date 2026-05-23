@@ -7,13 +7,9 @@
 
 <h2>Contents</h2>
 <ul>
-  <li><a href="clauses">Clauses</a> — Stored clauses, in-memory clauses, the clause term syntax, inner clauses, closures and capture semantics (including non-transitivity, per-clause scope, fold in clause bodies), and the five hard rules that must never be violated.</li>
-  <li><a href="control-flow">Control Flow</a> — when/when-not/if universal quantifiers, with-table-if per-solution branching, schema binding rules, row-identity preservation, the drop idiom, and the not-operator absence.</li>
-  <li><a href="built-ins">Built-in Terms</a> — Core terms, arithmetic, map operations, array operations, string operations, HTTP, symbols-in-literal-arguments rule, and deprecated http-get/post/delete terms.</li>
-  <li><a href="reducers">Reducers</a> — fold, with-unique-by, with-order-by, with-group-by, with-count, with-limit, with-skip, with-sort, and all fold pitfall patterns.</li>
-  <li><a href="query-execution">Query Execution</a> — Index selection strategies (defterm PK, write-index exact/prefix, Mango fallback), operator push-down per strategy, the Mango silent-ignore gotcha for with-skip/with-limit, and the mango-query built-in with its mandatory enable-full-scan/disable-full-scan bookend requirement.</li>
-  <li><a href="s-expression-evaluation">S-Expression Evaluation Model</a> — Why S-expressions extend solution bindings rather than produce inline values, why map literals require pre-bound symbols (not nested term calls), and why terms like <code>uuid</code> must be wrapped in <code>run-term</code> for per-row execution.</li>
-  <li><a href="built-in-collision">Built-in Name Collision</a> — What happens when a defterm or functor name shadows an OQL built-in term solver name, why the failure is silent wrong results (no error), and how to avoid it.</li>
+  <li><a href="core">Core Language Mechanics</a> — Clause definition and capture semantics, control flow primitives (when/when-not/if/with-table-if), and the S-expression evaluation model. The foundational mechanics before writing any OQL clause.</li>
+  <li><a href="terms">Built-in Terms</a> — The vocabulary of built-in term solvers: core primitives, arithmetic, map/array/string operations, HTTP, and the constraint that functor names must not shadow built-ins.</li>
+  <li><a href="execution">Query Execution</a> — Solution reducers (fold, with-count, with-order-by, etc.) and index-selection strategies (defterm PK, write-index, Mango fallback). Required reading for any query that aggregates, sorts, or must avoid full-scan throws.</li>
 </ul>
 
 <h2>Not here</h2>
