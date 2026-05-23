@@ -13,6 +13,7 @@
   <li><a href="reducers">Reducers</a> — fold, with-unique-by, with-order-by, with-group-by, with-count, with-limit, with-skip, with-sort, and all fold pitfall patterns.</li>
   <li><a href="query-execution">Query Execution</a> — Index selection strategies (defterm PK, write-index exact/prefix, Mango fallback), operator push-down per strategy, the Mango silent-ignore gotcha for with-skip/with-limit, and the mango-query built-in with its mandatory enable-full-scan/disable-full-scan bookend requirement.</li>
   <li><a href="s-expression-evaluation">S-Expression Evaluation Model</a> — Why S-expressions extend solution bindings rather than produce inline values, why map literals require pre-bound symbols (not nested term calls), and why terms like <code>uuid</code> must be wrapped in <code>run-term</code> for per-row execution.</li>
+  <li><a href="built-in-collision">Built-in Name Collision</a> — What happens when a defterm or functor name shadows an OQL built-in term solver name, why the failure is silent wrong results (no error), and how to avoid it.</li>
 </ul>
 
 <h2>Not here</h2>

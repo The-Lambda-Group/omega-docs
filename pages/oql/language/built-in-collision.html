@@ -1,0 +1,78 @@
+<h1>Built-in Name Collision</h1>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>What this is</h2>
+
+<p>OQL has a set of built-in term solvers — terms like <code>http-endpoint</code>, <code>http-request</code>, <code>uuid</code>, <code>time-now</code> — that are resolved by the engine before any datastore lookup. When you declare a <code>defterm</code> (or a <code>functor</code>) whose name matches a built-in term solver, the built-in wins silently. OmegaDB does not warn. Reads against the datastore return wrong results or no results with no error.</p>
+
+<h2>The production example</h2>
+
+<p>In the http-hook implementation, a registry <code>defterm</code> was given the functor name <code>"http-endpoint"</code>:</p>
+
+<pre><code>(defterm Qo.Data.HttpHookRegistry
+  {"name"        "http-endpoint"
+   "args"        ["Loc" "Id" "Func"]
+   "primary-key" ["Id"]})</code></pre>
+
+<p>OQL has a built-in term solver also named <code>http-endpoint</code> (no <code>!</code>). When a read query ran against the datastore:</p>
+
+<pre><code>(DS/http-endpoint Loc Id Func)</code></pre>
+
+<p>…the engine dispatched the built-in solver instead of the defterm read path. The built-in <code>http-endpoint</code> performs live endpoint registration, not a datastore read. The query returned wrong results silently — no error, no warning, no indication that the wrong solver fired. Fix: rename the defterm functor to <code>"http-ep"</code> so it no longer collides.</p>
+
+<h2>The hard rule</h2>
+
+<p><strong>Defterm functor names must not collide with any built-in term solver name.</strong> When they do, the built-in wins — silently, at every call site. OmegaDB has no detection or warning for this collision. The failure mode is silent wrong results, which is harder to diagnose than an error.</p>
+
+<h2>Known built-in term solver names</h2>
+
+<p>The following names are reserved by the engine. Do not use any of them as a <code>defterm</code> name, <code>functor</code> name, or clause head:</p>
+
+<table>
+  <tr><th>Built-in name</th><th>What it does</th></tr>
+  <tr><td><code>http-endpoint</code></td><td>Registers an HTTP endpoint handler. Returns <code>{"id" EndpointId}</code>.</td></tr>
+  <tr><td><code>delete-http-endpoint</code></td><td>Unregisters an HTTP endpoint by id.</td></tr>
+  <tr><td><code>http-request</code></td><td>Makes an HTTP request. See <a href="built-ins">Built-in Terms § HTTP</a>.</td></tr>
+  <tr><td><code>uuid</code></td><td>Generates a new UUID string.</td></tr>
+  <tr><td><code>time-now</code></td><td>Returns the current ISO timestamp.</td></tr>
+  <tr><td><code>throw</code></td><td>Raises a typed OQL exception.</td></tr>
+  <tr><td><code>return</code></td><td>Returns results from a query.</td></tr>
+  <tr><td><code>defined</code></td><td>Tests whether a symbol is bound.</td></tr>
+  <tr><td><code>rand</code></td><td>Random double in [0.0, 1.0).</td></tr>
+  <tr><td><code>rand-int</code></td><td>Random integer in a range.</td></tr>
+  <tr><td><code>enable-full-scan</code> / <code>disable-full-scan</code></td><td>Bookends for Mango full-scan queries.</td></tr>
+  <tr><td><code>mango-query</code></td><td>Executes a raw Mango query against a datastore.</td></tr>
+  <tr><td><code>json-stringify</code></td><td>Bidirectional JSON ↔ string conversion.</td></tr>
+  <tr><td><code>string-split</code>, <code>string-concat</code>, <code>string-contains</code>, <code>string-replace</code>, <code>re-find</code>, <code>string-format</code></td><td>String operations.</td></tr>
+  <tr><td><code>get</code>, <code>get-in</code>, <code>set</code>, <code>merge</code>, <code>select-keys</code>, <code>zip</code></td><td>Map operations.</td></tr>
+  <tr><td><code>get-list</code>, <code>length</code>, <code>append</code>, <code>concat</code>, <code>partition</code></td><td>Array operations.</td></tr>
+  <tr><td><code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code></td><td>Arithmetic / comparison.</td></tr>
+  <tr><td><code>fold</code>, <code>with-unique-by</code>, <code>with-order-by</code>, <code>with-group-by</code>, <code>with-count</code>, <code>with-limit</code>, <code>with-skip</code>, <code>with-sort</code></td><td>Reducers. See <a href="reducers">Reducers</a>.</td></tr>
+  <tr><td><code>when</code>, <code>when-not</code>, <code>if</code>, <code>with-table-if</code></td><td>Control flow. See <a href="control-flow">Control Flow</a>.</td></tr>
+  <tr><td><code>run-term</code>, <code>call</code></td><td>Clause invocation primitives.</td></tr>
+  <tr><td><code>run-page</code>, <code>set-data</code></td><td>Page/data operations.</td></tr>
+  <tr><td><code>prop-vals-by-folder</code>, <code>row-index</code>, <code>sec-index</code></td><td>Datastore read primitives.</td></tr>
+  <tr><td><code>write-table</code>, <code>delete-rows</code></td><td>Datastore write primitives.</td></tr>
+</table>
+
+<p><strong>Note:</strong> This list covers known built-ins at the time of writing. It may not be exhaustive — the engine's internal resolver can claim any name it recognizes. If you observe silent wrong results or unexpected behavior from a newly named functor, check whether the functor name matches anything in the built-in term vocabulary.</p>
+
+<h2>How to avoid the collision</h2>
+
+<ol>
+  <li><strong>Use a domain-scoped functor name.</strong> Names like <code>"http-ep"</code>, <code>"hook-registry"</code>, <code>"my-endpoint-record"</code> are safe. Single-word names that match common verbs or nouns (<code>"endpoint"</code>, <code>"request"</code>, <code>"hook"</code>, <code>"get"</code>, <code>"set"</code>) are likely to collide now or in a future engine release.</li>
+  <li><strong>Test reads immediately after declaring a new functor name.</strong> After adding a <code>defterm</code> or <code>functor</code>, push and run a probe that reads from the datastore. If the read returns no results or unexpected data with no error, suspect a built-in collision and rename.</li>
+  <li><strong>Prefer namespace-prefixed functor names in production code.</strong> A name like <code>"http-hook-data"</code> is far less likely to collide than <code>"http-endpoint"</code>.</li>
+</ol>
+
+<h2>Why the engine does not warn</h2>
+
+<p>OQL's term resolution dispatches to the built-in solver before checking datastores. The engine treats the built-in match as a normal successful dispatch — it does not know a defterm with the same name exists at the application layer, so it has nothing to warn about. This is a structural gap, not a missing warning log. Until the engine adds a registration-time conflict check, name collision avoidance is the author's responsibility.</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="built-ins">Built-in Terms</a> — Full reference for all built-in term signatures.</li>
+  <li><a href="../datastores/defterm">defterm Semantics</a> — Row-id derivation, when to add a defterm, destructive-rekey risks.</li>
+</ul>
