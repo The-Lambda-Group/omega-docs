@@ -31,6 +31,16 @@
   <li>Control flow — read this before writing any <code>when</code>, <code>when-not</code>, <code>if</code>, or <code>with-table-if</code>.</li>
 </ul>
 
+<h2>Authoring conventions</h2>
+
+<ul>
+  <li><strong>Prefer global conditionals first.</strong> Reach for <code>when</code>, <code>when-not</code>, and <code>if</code> unless the branch genuinely depends on per-row table scope. Use <code>with-table-if</code> only when row-scoped symbols must survive through the branch.</li>
+  <li><strong>Keep headers and branch schemas small.</strong> Clause headers, helper signatures, and <code>with-table-if</code> binding vectors should stay narrow. If a header starts carrying many symbols, split the work into smaller helpers and stage intermediates in chunks.</li>
+  <li><strong>Chunk long computations.</strong> If a clause is doing setup, branching, shaping, and writing all at once, break it into smaller helpers with compact interfaces. Shorter chunks are easier to probe, keep branch schemas narrow, and reduce accidental cross-products.</li>
+  <li><strong>Keep map literals below the practical limit.</strong> Large inline maps become hard to inspect and can hit runtime limits. Build request maps, context maps, and payloads as smaller pieces, then combine them with <code>merge</code>.</li>
+  <li><strong>Minimize join width.</strong> Every shared symbol is a join key. Pass only the symbols a helper or branch actually needs, and split helpers when a wide join is carrying unrelated context.</li>
+</ul>
+
 <h2>Debug by returning early</h2>
 
 <p>When a query fails partway through — wrong HTTP status, missing row, mysterious unbound symbol — the fastest path to the root cause is to <strong>comment out everything after the suspected failure point and return a snapshot of the intermediate state</strong>. Re-run the query, inspect the snapshot, then un-comment one more clause and repeat.</p>
