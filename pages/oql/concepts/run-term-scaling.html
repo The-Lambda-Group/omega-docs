@@ -16,6 +16,19 @@
 
 <p>If you are not replacing a <code>with-group-by</code> and not in a per-row iteration at scale, you are not in the exception. Use <code>call</code>.</p>
 
+<h2>Debugging rule: run-term can swallow inner errors</h2>
+
+<p>When a stack trace or <code>omega/query/no-return</code> points at <code>run-term</code>, do not assume <code>run-term</code> is the root cause. <code>run-term</code> can swallow the inner failure shape: the caller may see only the boundary <code>no-return</code>, while the target term's real failing line is hidden inside the fresh execution. First capture the exact inputs to the <code>run-term</code> call, then reproduce the exact target term with those fixed inputs.</p>
+
+<pre><code>;; Before
+(run-term RunPdlRow Ctx AgentLink AgentName RowResult)
+
+;; First probe
+(= Result [Ctx AgentLink AgentName])
+(return [Result])</code></pre>
+
+<p>For scratch-capable failures, the minimum repro imports the required datastore, binds exact observed inputs as literals, calls the exact failing term, and returns inputs plus outputs as one table. If the term depends on an implementation object, captured helper context, install snapshot, <code>run-page</code> dispatch, or live component state, keep the repro in the worktree and document why scratch is invalid. Do not stop at the swallowed <code>run-term</code> boundary.</p>
+
 <h2>Why agents get this wrong</h2>
 
 <p>The documentation for <code>run-term</code> covers both the partition-before-fold case and the per-row-iteration case. Agents reading the performance section of the reducers doc often conclude "use <code>run-term</code> for performance" and apply it to all captured-helper calls. This is wrong. <code>run-term</code> is not a general performance optimization — it is the correct tool for exactly two shapes, and it actively breaks other shapes.</p>
