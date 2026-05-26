@@ -27,6 +27,8 @@
 (when (= Step "filter") (= PageName "Filter Agents"))
 (when (= Step "batch")  (= PageName "GHL Sync"))</code></pre>
 
+<p><strong>Default choice:</strong> prefer these global conditionals unless the branch must preserve per-row symbols from the current solution table. If the decision is scalar for the whole batch, staying in <code>when</code>, <code>when-not</code>, or <code>if</code> avoids unnecessary branch tables and join keys.</p>
+
 <h3>when-not in multi-solution context is all-or-nothing</h3>
 <p><code>(when-not condition)</code> is a <strong>universal quantifier</strong>: it succeeds only when the condition produces zero solutions across the <em>entire</em> current solution table. In a multi-solution context (e.g. after <code>prop-vals-by-folder</code> returns N rows), <code>when-not</code> is not a per-row filter — it passes through all solutions only if <em>no</em> solution in the table satisfies the condition.</p>
 <pre><code>;; WRONG — filters to only rows where NO solution in the table has a block
@@ -44,6 +46,8 @@
 <h2>with-table-if (per-solution branching)</h2>
 
 <p><code>with-table-if</code> branches <strong>per solution</strong>. The condition evaluates within the parent solution, and each branch creates its own table solution.</p>
+
+<p>Use <code>with-table-if</code> only when the branch really needs row-scoped state to survive through the branch body or back out into the downstream solution. If the branch is just choosing one scalar value, prefer <code>if</code> or a global conditional outside the table scope.</p>
 
 <pre><code>(with-table-if Condition
   [Var1 Var2 Result]          ;; table head — variables in scope for both branches
@@ -205,6 +209,8 @@
 <h3>The binding list as JOIN key</h3>
 
 <p>The binding list is not just a visibility declaration — it is the JOIN key between the outer solution table and the inner branch. Any outer-scope variable the inner branch needs must appear in the binding list. If you omit a variable, the inner branch runs independently and results lose their association with the outer rows.</p>
+
+<p><strong>Keep the binding list narrow.</strong> Every symbol you carry through the schema becomes part of the branch join surface. Pass the row identity plus the few values the branch truly needs. If the branch wants many unrelated symbols, split the computation into smaller helpers or chunks, or stage a compact <code>Ctx</code> map and unpack it inside the branch.</p>
 
 <pre><code>;; WRONG — Data is not in the binding list; association is severed
 (with-table-if (get Data "campaign_id" SpecificId)

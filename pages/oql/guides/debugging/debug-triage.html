@@ -13,7 +13,26 @@
 
 <p>Before any theory of cause, strip the failing invocation to the smallest thing that still reproduces. If what you are running is larger than what reproduces, you have not narrowed.</p>
 
-<p><strong>Artifact:</strong> a one-screen scratch file or <code>qo run</code> command that reproduces the failure. Pin its exact output at the top of your working notes.</p>
+<p><strong>Artifact:</strong> a fixed-input repro of the exact failing term. For scratch-capable failures, the minimum repro has four parts:</p>
+
+<ol>
+  <li>Import every required datastore.</li>
+  <li>Bind the exact input values observed at failure time as literals with <code>=</code>.</li>
+  <li>Call the exact failing term, not a parent handler or nearby helper.</li>
+  <li>Return the input and output symbols together as one table.</li>
+</ol>
+
+<pre><code>(datastore Some.Namespace "some/datastore/path")
+
+(= Input1 "exact literal value observed at failure time")
+(= Input2 "another exact literal value")
+
+(Some.Namespace/exact-failing-term Input1 Input2 Output1 Output2)
+
+(= Result [Input1 Input2 Output1 Output2])
+(return [Result])</code></pre>
+
+<p>A broad parent <code>qo run</code>, a parent page command, or a scratch query with inferred inputs is not a minimum reproduction. Pin the exact query or command and exact output at the top of your working notes.</p>
 
 <h3>2. Shrink the frame before changing any code</h3>
 
@@ -88,6 +107,19 @@
   <li><strong>LLM response truncation</strong>: a <code>call-llm</code> invocation fails with <code>omega/jvm/EOFException: JSON error (end-of-file inside string)</code>. The LLM emitted a response that was cut off mid-string before the closing braces and quotes that would make the payload valid JSON. This looks like a JSON parse bug but is not. Fix the producer — tighten the LLM prompt so it emits complete JSON responses within token limits.</li>
 </ul>
 
+<h3>When the failing line is run-term</h3>
+
+<p><code>run-term</code> often appears as the deepest visible failure boundary because it invokes the target in a fresh solution. It can swallow the inner failure shape: the caller may see only <code>omega/query/no-return</code> at the <code>run-term</code> boundary, while the target term's real failing line is hidden inside that fresh execution. Treat <code>run-term</code> as an error boundary first, not as the root cause. Comment out the <code>run-term</code>, return its exact inputs, and then call the target term with those fixed inputs.</p>
+
+<pre><code>;; Before
+(run-term RunPdlRow Ctx AgentLink AgentName RowResult)
+
+;; First probe
+(= Result [Ctx AgentLink AgentName])
+(return [Result])</code></pre>
+
+<p>After the inputs are captured, produce the four-part fixed-input repro for the target term if scratch can represent the real context. If scratch cannot represent the implementation object, captured helper symbols, install snapshot, <code>run-page</code> dispatch, multi-solution context, or live component state, keep triage in the worktree and document why scratch is invalid. Triage is not complete at the swallowed boundary; continue inward until the exact target term is reproduced with fixed inputs.</p>
+
 <h2>Check data table integrity</h2>
 
 <p>Use this when a table-backed lookup fails, a row reads as empty, or a helper probe produces surprising row-page results. Before diagnosing helper logic, prove whether the property table's storage contract is intact.</p>
@@ -115,7 +147,7 @@
 
 <h2>Triage in the worktree, not in scratch</h2>
 
-<p>Scratch queries are not always a clean triage environment. When the behavior you are investigating depends on multi-solution context — for example, a step that runs across many arms or rows simultaneously — a standalone scratch query cannot reproduce that context. Timings will be misleading, and a fix validated in scratch may not hold in the real component.</p>
+<p>Scratch queries are not always a clean triage environment. When the behavior you are investigating depends on an implementation object, captured helper clauses, an install snapshot, <code>run-page</code> dispatch, multi-solution context, or cross-component state, a standalone scratch query cannot reproduce that context. Timings will be misleading, and a fix validated in scratch may not hold in the real component.</p>
 
 <p><strong>When scratch gives misleading results, switch to worktree triage.</strong> The approach mirrors the frame-shrink discipline in rule 2, but applied to the live running implementation:</p>
 
