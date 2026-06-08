@@ -151,6 +151,51 @@
 <p>The error <code>ClassCastException: java.lang.Long cannot be cast to java.lang.String</code> with no stack hint means the direction is inverted. Check every <code>json-stringify</code> call that touches a number.</p>
 <p>Also: <code>(fold [] _ append _)</code> is invalid — <code>_</code> is a wildcard and cannot be folded over. Name the variable: <code>(run-term Helper ... ItemDone)</code> then <code>(fold [] ItemDone append _)</code>. Using <code>_</code> throws <code>IllegalArgumentException: Don't know how to create ISeq from: clojure.lang.Symbol</code>.</p>
 
+<h3>json-to-xml is bidirectional — XML string ⇄ JSON string</h3>
+
+<p><code>json-to-xml</code> converts between an XML string and a JSON string that encodes the XML tree as a faithful <code>{"tag", "attrs", "content"}</code> map structure. Like <code>json-stringify</code>, direction is determined by which argument is bound.</p>
+
+<pre><code>(json-to-xml JsonStr XmlStr)   ;; JSON: XML string &lt;-&gt; JSON string (bidirectional)</code></pre>
+
+<p><strong>Argument contract:</strong></p>
+<ul>
+  <li>At least one argument must be bound. Both arguments must be strings when bound.</li>
+  <li>If <code>JsonStr</code> is unbound: parses <code>XmlStr</code> and produces the JSON representation.</li>
+  <li>If <code>XmlStr</code> is unbound: produces an XML string from the JSON representation in <code>JsonStr</code>.</li>
+  <li>If both are bound: succeeds (one solution) only if the XML string is consistent with the JSON string; fails otherwise.</li>
+</ul>
+
+<p><strong>The JSON representation shape</strong> mirrors the clojure.data.xml <code>Element</code> structure faithfully:</p>
+<pre><code>{
+  "tag"     "&lt;element-name&gt;",
+  "attrs"   {"attr1" "value1", …},
+  "content" [ … child nodes (same shape, or plain strings for text nodes) … ]
+}</code></pre>
+
+<p><strong>Goal-fail on unparseable input:</strong> if the bound string is malformed XML (or malformed JSON that does not represent a valid element map), the term returns no solutions — the query branch silently dies. It does not throw.</p>
+
+<p><strong>Typed exceptions thrown on misuse:</strong></p>
+<table>
+  <tr><th>Condition</th><th>Exception type</th></tr>
+  <tr><td>Both arguments are unbound</td><td><code>JSON_TO_XML_BOTH_UNBOUND</code></td></tr>
+  <tr><td>A bound argument is not a string (e.g. a number or map)</td><td><code>JSON_TO_XML_NON_STRING_ARG</code></td></tr>
+</table>
+
+<p><strong>Example — parse an RSS feed body and extract the channel title:</strong></p>
+<pre><code>;; RssBody is an XML string from an http-request response
+(json-to-xml RssJson RssBody)          ;; parse XML → JSON tree
+(json-stringify RssData RssJson)       ;; parse JSON string → Clojure map
+(get RssData "tag" _)                  ;; top-level tag is "rss" or "feed"
+(get RssData "content" Children)
+;; … walk Children to find the channel/title element</code></pre>
+
+<p><strong>Example — emit XML from a structured map:</strong></p>
+<pre><code>(= ItemData {"tag" "item"
+             "attrs" {}
+             "content" [{"tag" "title" "attrs" {} "content" ["Hello"]}]})
+(json-stringify ItemJson ItemData)     ;; map → JSON string
+(json-to-xml ItemJson XmlOut)          ;; JSON string → XML string</code></pre>
+
 <h2>HTTP</h2>
 
 <p><strong><code>http-request</code></strong> is the general-purpose HTTP term and the only safe HTTP primitive.</p>
