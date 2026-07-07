@@ -219,6 +219,26 @@
 
 <p><strong>The <code>body</code> field is always a raw JSON string, never a parsed map.</strong> Parse it with <code>json-stringify</code> in parse-direction before accessing fields. Always branch on <code>status</code> BEFORE parsing <code>body</code>.</p>
 
+<h3>Response shape</h3>
+
+<p><code>http-request</code> binds a response map with exactly three string keys:</p>
+
+<ul>
+  <li><code>"status"</code> — the HTTP status code as an integer (e.g. <code>200</code>).</li>
+  <li><code>"body"</code> — the response body as a raw string (never parsed; <code>""</code> if empty).</li>
+  <li><code>"headers"</code> — the response headers as a map of <em>string</em> header-name → <em>string</em> value.</li>
+</ul>
+
+<p>Response <strong>headers</strong> are available — read them the same way as any nested map. This is how you retrieve values that APIs return in headers rather than the body (e.g. a created-resource id in a <code>Location</code> or <code>x-restli-id</code> header):</p>
+
+<pre><code>(http-request Req Res)
+(get Res "headers" Headers)                    ;; string → string map
+(get-in Res ["headers" "x-restli-id"] NewId)   ;; read one header</code></pre>
+
+<p><strong>Header-name casing is NOT normalized.</strong> The header names are exactly what the server/HTTP client returned — OmegaDB does not lowercase them. HTTP/2 servers send lowercase header names; HTTP/1.1 servers may send mixed case. If you are unsure of the casing, probe the actual keys of the <code>"headers"</code> map (e.g. <code>(get Res "headers" H) (return [H])</code>) before hard-coding a header name, or match case-insensitively.</p>
+
+<p>Only <code>http-request</code> exposes <code>"headers"</code> and <code>"status"</code>; the deprecated method-specific terms below do not.</p>
+
 <pre><code>;; Full error-handling pattern
 (= Req {"method" "post" "url" Url "headers" Headers "body" JsonBody})
 (http-request Req Res)
