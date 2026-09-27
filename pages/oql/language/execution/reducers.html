@@ -123,27 +123,21 @@
 
 <p>With one row in the solution, "all rows" and "this row" are the same set. Both fold pitfalls only surface when the batch contains two or more rows.</p>
 
-<h3>Partitioning a fold inside with-table-if: the key goes in the binding vector</h3>
+<h3>Partitioning a fold per row: use a run-term partition, not with-group-by</h3>
 
-<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. To keep one result per row, wrap the fold in <code>with-group-by</code> on the row's inputs, <strong>and</strong> list those inputs in the conditional's binding vector. A symbol bound before the conditional but missing from the vector is still used as a filter, but only over the set of all rows' values. It is not carried per row, so <code>with-group-by</code> on it does not partition.</p>
+<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner: the fold merges every row's values. Do <strong>not</strong> fix this with <code>with-group-by</code> inside the <code>with-table-if</code>. A <code>with-table-if</code> merge is a SELECT DISTINCT over its binding vector (<a href="../core/control-flow">control-flow</a>, "Preserving per-row identity"), so condition rows from different partitions that share values are attributed to the wrong partition. Put the fold in a clause, and call that clause once per row with <code>run-term</code>, which gives each call a fresh solution (the partition-before-fold shape in "Performance: partitions and run-term" below).</p>
 
-<pre><code>;; BAD at batch>1: Email is bound before the conditional; both rows get one merged list
-(with-table-if (and (Db.Prop/prop-vals-by-folder T RowId PV)
-                    (get-in PV ["prop-vals" "email"] Email)
-                    (get-in PV ["prop-vals" "reading"] R))
-  [RowId R Readings]
-  (fold [] R append Readings)
-  (= Readings []))
+<pre><code>;; BAD at batch>1: one merged list for every row
+(call ReadingsBefore T Email BoundTs Readings)
 
-;; STILL BAD: with-group-by on a key that is not in the vector does not partition
-  [RowId R Readings]
-  (with-group-by [Email] (fold [] R append Readings))
+;; ALSO BAD: with-group-by inside the conditional, even with the key in the vector
+  [Email BoundTs Day R Readings]
+  (with-group-by [Email BoundTs] (with-unique-by [Day] (with-order-by [Day] (fold [] R append Readings))))
 
-;; GOOD: the key is in the vector AND grouped on; each row gets only its own readings
-  [Email R Readings]
-  (with-group-by [Email] (fold [] R append Readings))</code></pre>
+;; GOOD: the single-row helper is unchanged; each row gets its own solution
+(run-term ReadingsBefore T Email BoundTs Readings)</code></pre>
 
-<p>Measured live (2026-09-26, two owners in one solution): the first two forms gave both owners the same six readings, and the third gave each owner their own three. When the rows' other inputs can differ too (a per-row date bound), put those in the vector and the group key as well: <code>[Email BoundTs Day R Readings]</code> with <code>(with-group-by [Email BoundTs] …)</code>. Probe any folding helper with at least two rows before trusting it.</p>
+<p>Measured live, 2026-09-27. The <code>with-group-by</code> form looked correct with two owners that had distinct values. With the 23 owners of one production poll page, whose readings collide (many zeros), it returned 118 rows for 23 inputs, handing owners other owners' readings. The resulting duplicate keys made the materialized-view write fail with <code>KEY_UPDATE_CONFLICT</code>. Prove a folding helper at the real batch size on real-shaped data, and assert that the output row count equals the input row count.</p>
 
 <h2>with-unique-by</h2>
 
