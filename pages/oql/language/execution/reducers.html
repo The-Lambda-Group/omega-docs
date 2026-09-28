@@ -123,27 +123,37 @@
 
 <p>With one row in the solution, "all rows" and "this row" are the same set. Both fold pitfalls only surface when the batch contains two or more rows.</p>
 
-<h3>Partitioning a fold inside with-table-if: the key goes in the binding vector</h3>
+<h3>Per-row results from one table: fold into a lookup, then join by key</h3>
 
-<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. To keep one result per row, wrap the fold in <code>with-group-by</code> on the row's inputs, <strong>and</strong> list those inputs in the conditional's binding vector. A symbol bound before the conditional but missing from the vector is still used as a filter, but only over the set of all rows' values. It is not carried per row, so <code>with-group-by</code> on it does not partition.</p>
+<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. Two engine facts combine. A fold is solution-wide, and it folds over unique <em>values</em>, so under <code>with-group-by</code> groups whose folded values are equal (two owners with a reading of 0 on the same day) merge. And a <code>with-table-if</code> merge is a SELECT DISTINCT over its binding vector (<a href="../core/control-flow">control-flow</a>, "Preserving per-row identity").</p>
 
-<pre><code>;; BAD at batch>1: Email is bound before the conditional; both rows get one merged list
-(with-table-if (and (Db.Prop/prop-vals-by-folder T RowId PV)
-                    (get-in PV ["prop-vals" "email"] Email)
-                    (get-in PV ["prop-vals" "reading"] R))
-  [RowId R Readings]
-  (fold [] R append Readings)
-  (= Readings []))
+<p>Write it the way you would in SQL: aggregate the whole table ONCE into a lookup keyed by the per-row key, then join each row to its own entry.</p>
 
-;; STILL BAD: with-group-by on a key that is not in the vector does not partition
-  [RowId R Readings]
-  (with-group-by [Email] (fold [] R append Readings))
+<pre><code>;; one aggregate for the whole table: {"&lt;email&gt;|&lt;bound&gt;": [day reading]}; later days overwrite
+(if (and (Db.Prop/prop-vals-by-folder T RowId PV)
+         (get-in PV ["prop-vals" "email"] E)
+         (get-in PV ["prop-vals" "day"] Day)
+         (get-in PV ["prop-vals" "reading"] R)
+         (string-concat E "|" K0)
+         (string-concat K0 BoundTs K)
+         (= Entry [K [Day R]]))
+  (with-unique-by [K Day] (with-order-by [Day] (fold {} Entry append LastBy)))
+  (= LastBy {}))
 
-;; GOOD: the key is in the vector AND grouped on; each row gets only its own readings
-  [Email R Readings]
-  (with-group-by [Email] (fold [] R append Readings))</code></pre>
+;; each row joins its own key; Key MUST be in the binding vector
+(with-table-if (get LastBy Key Pair)
+  [Key Pair Last]
+  (get Pair 1 Last)
+  (= Last 0))</code></pre>
 
-<p>Measured live (2026-09-26, two owners in one solution): the first two forms gave both owners the same six readings, and the third gave each owner their own three. When the rows' other inputs can differ too (a per-row date bound), put those in the vector and the group key as well: <code>[Email BoundTs Day R Readings]</code> with <code>(with-group-by [Email BoundTs] …)</code>. Probe any folding helper with at least two rows before trusting it.</p>
+<p>Measured live, 2026-09-27, over 25 production owners with colliding readings:</p>
+<ul>
+  <li>This form was correct for all 25 in about 2 s.</li>
+  <li><code>with-group-by</code> folding the bare reading merged owners (118 rows for 23).</li>
+  <li>With a folded value that carries the key (<code>{"email" E "day" D "reading" R}</code>) it was correct, but took about 21 s at 23 groups and timed out at 25.</li>
+  <li>Leaving <code>Key</code> out of the lookup's binding vector cross-joined every row with every distinct <code>[day reading]</code> (300 rows for 25).</li>
+</ul>
+<p>Prove a folding helper at the real batch size on real-shaped data, and assert that output rows equal input rows.</p>
 
 <h2>with-unique-by</h2>
 
