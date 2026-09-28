@@ -123,21 +123,37 @@
 
 <p>With one row in the solution, "all rows" and "this row" are the same set. Both fold pitfalls only surface when the batch contains two or more rows.</p>
 
-<h3>Partitioning a fold per row: use a run-term partition, not with-group-by</h3>
+<h3>Per-row results from one table: fold into a lookup, then join by key</h3>
 
-<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner: the fold merges every row's values. Do <strong>not</strong> fix this with <code>with-group-by</code> inside the <code>with-table-if</code>. A <code>with-table-if</code> merge is a SELECT DISTINCT over its binding vector (<a href="../core/control-flow">control-flow</a>, "Preserving per-row identity"), so condition rows from different partitions that share values are attributed to the wrong partition. Put the fold in a clause, and call that clause once per row with <code>run-term</code>, which gives each call a fresh solution (the partition-before-fold shape in "Performance: partitions and run-term" below).</p>
+<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. Two engine facts combine. A fold is solution-wide, and it folds over unique <em>values</em>, so under <code>with-group-by</code> groups whose folded values are equal (two owners with a reading of 0 on the same day) merge. And a <code>with-table-if</code> merge is a SELECT DISTINCT over its binding vector (<a href="../core/control-flow">control-flow</a>, "Preserving per-row identity").</p>
 
-<pre><code>;; BAD at batch>1: one merged list for every row
-(call ReadingsBefore T Email BoundTs Readings)
+<p>Write it the way you would in SQL: aggregate the whole table ONCE into a lookup keyed by the per-row key, then join each row to its own entry.</p>
 
-;; ALSO BAD: with-group-by inside the conditional, even with the key in the vector
-  [Email BoundTs Day R Readings]
-  (with-group-by [Email BoundTs] (with-unique-by [Day] (with-order-by [Day] (fold [] R append Readings))))
+<pre><code>;; one aggregate for the whole table: {"&lt;email&gt;|&lt;bound&gt;": [day reading]}; later days overwrite
+(if (and (Db.Prop/prop-vals-by-folder T RowId PV)
+         (get-in PV ["prop-vals" "email"] E)
+         (get-in PV ["prop-vals" "day"] Day)
+         (get-in PV ["prop-vals" "reading"] R)
+         (string-concat E "|" K0)
+         (string-concat K0 BoundTs K)
+         (= Entry [K [Day R]]))
+  (with-unique-by [K Day] (with-order-by [Day] (fold {} Entry append LastBy)))
+  (= LastBy {}))
 
-;; GOOD: the single-row helper is unchanged; each row gets its own solution
-(run-term ReadingsBefore T Email BoundTs Readings)</code></pre>
+;; each row joins its own key; Key MUST be in the binding vector
+(with-table-if (get LastBy Key Pair)
+  [Key Pair Last]
+  (get Pair 1 Last)
+  (= Last 0))</code></pre>
 
-<p>Measured live, 2026-09-27. The <code>with-group-by</code> form looked correct with two owners that had distinct values. With the 23 owners of one production poll page, whose readings collide (many zeros), it returned 118 rows for 23 inputs, handing owners other owners' readings. The resulting duplicate keys made the materialized-view write fail with <code>KEY_UPDATE_CONFLICT</code>. Prove a folding helper at the real batch size on real-shaped data, and assert that the output row count equals the input row count.</p>
+<p>Measured live, 2026-09-27, over 25 production owners with colliding readings:</p>
+<ul>
+  <li>This form was correct for all 25 in about 2 s.</li>
+  <li><code>with-group-by</code> folding the bare reading merged owners (118 rows for 23).</li>
+  <li>With a folded value that carries the key (<code>{"email" E "day" D "reading" R}</code>) it was correct, but took about 21 s at 23 groups and timed out at 25.</li>
+  <li>Leaving <code>Key</code> out of the lookup's binding vector cross-joined every row with every distinct <code>[day reading]</code> (300 rows for 25).</li>
+</ul>
+<p>Prove a folding helper at the real batch size on real-shaped data, and assert that output rows equal input rows.</p>
 
 <h2>with-unique-by</h2>
 
