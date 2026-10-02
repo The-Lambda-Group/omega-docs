@@ -104,6 +104,6 @@
   <li>Three different errors in one session with no consistent trend.</li>
   <li>A wall-clock longer than 30 seconds on any operation that should complete in seconds.</li>
   <li>An <code>omega/query/timeout</code> error: the query ran past the engine's Query Deadline (45 s) and was stopped. One term is doing too much, usually rows multiplying. Return early and count rows before changing anything.</li>
-  <li>A socket hang-up or <code>ECONNRESET</code>. At ~50 s it is the load balancer cutting a long call; a query that slow should now answer <code>omega/query/timeout</code> instead. A hang-up much sooner may mean the engine is stalled and needs a pod restart.</li>
+  <li>A socket hang-up or <code>ECONNRESET</code>. At ~50 s it is the load balancer cutting a long call; a query that slow usually answers <code>omega/query/timeout</code> first, unless one outbound call is itself still waiting. A hang-up much sooner may mean the engine is stalled and needs a pod restart.</li>
   <li>A "not sure what to try next" state without a concrete next probe defined.</li>
 </ul>
