@@ -103,7 +103,7 @@
   <li>The same error appearing after the same fix has been applied twice.</li>
   <li>Three different errors in one session with no consistent trend.</li>
   <li>A wall-clock longer than 30 seconds on any operation that should complete in seconds.</li>
-  <li>An <code>omega/query/timeout</code> error: the query ran past the engine's Query Deadline (45 s) and was stopped. One term is doing too much, usually rows multiplying. Return early and count rows before changing anything.</li>
-  <li>A socket hang-up or <code>ECONNRESET</code>. At ~50 s it is the load balancer cutting a long call; a query that slow usually answers <code>omega/query/timeout</code> first, unless one outbound call is itself still waiting. A hang-up much sooner may mean the engine is stalled and needs a pod restart.</li>
+  <li>An <code>omega/query/timeout</code> error: the query ran past the engine's Query Deadline (60 s) and was stopped. One term is doing too much, usually rows multiplying. Return early and count rows before changing anything.</li>
+  <li>A socket hang-up or <code>ECONNRESET</code>. A slow query answers <code>omega/query/timeout</code> at 60 s instead, and the proxies in front allow 300 s. A hang-up means one outbound call is still waiting, or the engine may be stalled and need a pod restart. A hang-up much sooner may mean the engine is stalled and needs a pod restart.</li>
   <li>A "not sure what to try next" state without a concrete next probe defined.</li>
 </ul>
