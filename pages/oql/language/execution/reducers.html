@@ -123,36 +123,37 @@
 
 <p>With one row in the solution, "all rows" and "this row" are the same set. Both fold pitfalls only surface when the batch contains two or more rows.</p>
 
-<h3>Per-row results from one table: fold into a lookup, then join by key</h3>
+<h3>Per-row results from one table: read each row's own key in its own partition</h3>
 
-<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. Two engine facts combine. A fold is solution-wide, and it folds over unique <em>values</em>, so under <code>with-group-by</code> groups whose folded values are equal (two owners with a reading of 0 on the same day) merge. And a <code>with-table-if</code> merge is a SELECT DISTINCT over its binding vector (<a href="../core/control-flow">control-flow</a>, "Preserving per-row identity").</p>
+<p>A clause that folds is correct at batch=1 and wrong the moment a caller hands it several rows, for example one row per owner. A fold is solution-wide, and it folds over unique <em>values</em>, so owners whose readings are equal merge. Do not fix that by folding the WHOLE table into a lookup: that reads every row ever written for every page, including rows of keys not in the batch, and its cost grows with the table's history.</p>
 
-<p>Write it the way you would in SQL: aggregate the whole table ONCE into a lookup keyed by the per-row key, then join each row to its own entry.</p>
+<p>Instead, run the fold once per row with <code>run-term</code> (one partition per row — see "Performance: partitions and run-term" below), read only that row's key through an index, and make the fold unique by the member key:</p>
 
-<pre><code>;; one aggregate for the whole table: {"&lt;email&gt;|&lt;bound&gt;": [day reading]}; later days overwrite
-(if (and (Db.Prop/prop-vals-by-folder T RowId PV)
-         (get-in PV ["prop-vals" "email"] E)
-         (get-in PV ["prop-vals" "day"] Day)
-         (get-in PV ["prop-vals" "reading"] R)
-         (string-concat E "|" K0)
-         (string-concat K0 BoundTs K)
-         (= Entry [K [Day R]]))
-  (with-unique-by [K Day] (with-order-by [Day] (fold {} Entry append LastBy)))
-  (= LastBy {}))
+<pre><code>;; the table declares the index once, in its installer
+(Qo.Public.OqlApi.Db.Prop/init-sec-indexes TablePage ["email"] _)
 
-;; each row joins its own key; Key MUST be in the binding vector
-(with-table-if (get LastBy Key Pair)
-  [Key Pair Last]
-  (get Pair 1 Last)
-  (= Last 0))</code></pre>
+;; one owner's latest [day reading] before a bound, else {}
+(:- (LastMapOf T Email BoundTs LastBy)
+    (if (and (Qo.Public.OqlApi.Db.Prop/sec-index T "email" Email RowId)
+             (Qo.Public.OqlApi.Db.Prop/prop-vals-by-folder T RowId PV)
+             (get-in PV ["prop-vals" "day"] Day)
+             (string-concat Day "T00:00:00.000Z" DayTs)
+             (time-after BoundTs DayTs)
+             (get-in PV ["prop-vals" "reading"] R)
+             (= Entry ["last" [Day R]]))
+      (with-unique-by [Day] (with-order-by [Day] (fold {} Entry append LastBy)))
+      (= LastBy {})))
 
-<p>Measured live, 2026-09-27, over 25 production owners with colliding readings:</p>
+;; called per row from a multi-row solution
+(run-term LastReadingOf T Email BoundTs Last)</code></pre>
+
+<p>Two engine facts shape it:</p>
 <ul>
-  <li>This form was correct for all 25 in about 2 s.</li>
-  <li><code>with-group-by</code> folding the bare reading merged owners (118 rows for 23).</li>
-  <li>With a folded value that carries the key (<code>{"email" E "day" D "reading" R}</code>) it was correct, but took about 21 s at 23 groups and timed out at 25.</li>
-  <li>Leaving <code>Key</code> out of the lookup's binding vector cross-joined every row with every distinct <code>[day reading]</code> (300 rows for 25).</li>
+  <li>The <code>if</code> is tabulated, not <code>with-table-if</code>: a <code>with-table-if</code> projects the solution to its binding vector, so a fold in its THEN branch over symbols not listed there (<code>Day</code>, <code>Entry</code>) fails with <code>IllegalArgumentException</code>. Listing them all can exceed the 6-symbol header limit (<code>omega/query/header-too-large</code>).</li>
+  <li>Inside its own partition a row with nothing before the bound takes the ELSE branch alone, so it still answers <code>{}</code> rather than being dropped.</li>
 </ul>
+
+<p>Measured on 2026-10-05 against production readings, with 53 and 55 owner-and-bound rows in one solution: every answer equalled the raw rows, including owners with no earlier reading and an unknown owner. The whole-table lookup also gave correct answers, in 1.5 s on a 104-row table, but it reads the entire table on every call. Worked example: <code>usage-system-of-record/component-src/OpenRouter Token Usage/implementations/UsageResource.oql</code> (<code>LastMapOf</code>, <code>LastBefore</code>).</p>
 <p>Prove a folding helper at the real batch size on real-shaped data, and assert that output rows equal input rows.</p>
 
 <h2>with-unique-by</h2>
