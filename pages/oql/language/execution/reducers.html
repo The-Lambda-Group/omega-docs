@@ -153,7 +153,7 @@
   <li>Inside its own partition a row with nothing before the bound takes the ELSE branch alone, so it still answers <code>{}</code> rather than being dropped.</li>
 </ul>
 
-<p>Measured on 2026-10-05 against production readings, with 53 and 55 owner-and-bound rows in one solution: every answer equalled the raw rows, including owners with no earlier reading and an unknown owner. The whole-table lookup also gave correct answers, in 1.5 s on a 104-row table, but it reads the entire table on every call. Worked example: <code>usage-system-of-record/component-src/OpenRouter Token Usage/implementations/UsageResource.oql</code> (<code>LastMapOf</code>, <code>LastBefore</code>).</p>
+<p>Measured on 2026-10-05 against production readings, with 53 and 55 owner-and-bound rows in one solution: every answer equalled the raw rows, including owners with no earlier reading and an unknown owner. The whole-table lookup also gave correct answers, and at that size it was faster: about 1.5 s against about 3 s for the per-row form on 104- and 271-row tables, because each <code>run-term</code> partition has a fixed cost. The per-row form wins on growth, not on a small table: its cost depends only on the batch's own keys, while the whole-table lookup reads every row ever written on every call. Worked example: <code>usage-system-of-record/component-src/OpenRouter Token Usage/implementations/UsageResource.oql</code> (<code>LastMapOf</code>, <code>LastBefore</code>).</p>
 <p>Prove a folding helper at the real batch size on real-shaped data, and assert that output rows equal input rows.</p>
 
 <h2>with-unique-by</h2>
