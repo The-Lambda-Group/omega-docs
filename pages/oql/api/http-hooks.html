@@ -29,7 +29,10 @@
  "method"        "GET"
  "headers"       {"content-type" "application/json"}
  "query-params"  {"code" "abc123"}
+ "form-params"   {}
  "body"          "raw string or nil"}</code></pre>
+
+<p>A form-urlencoded POST (<code>Content-Type: application/x-www-form-urlencoded</code>, the shape OAuth token endpoints use) arrives already parsed in <code>"form-params"</code>, a map of field name to value, and <code>"body"</code> is nil. Any other body arrives as the raw string in <code>"body"</code>, and <code>"form-params"</code> is <code>{}</code>.</p>
 
 <p>The handler must unify <code>Result</code> with a response map containing <code>"status"</code> (integer), <code>"headers"</code> (map), and <code>"body"</code> (string).</p>
 
@@ -53,6 +56,13 @@
                "headers" {"Location" "https://app.queryomega.com/success"}
                "body" ""}))</code></pre>
 
+<h3>Form POST (reads form-params)</h3>
+<pre><code>(:- (MyDs/token-endpoint! Exec Result)
+    (get Exec "form-params" Form)
+    (get Form "grant_type" GrantType)
+    ;; answer the form
+    (= Result {"status" 200 "body" GrantType "headers" {"Content-Type" "text/plain"}}))</code></pre>
+
 <h3>Webhook (POST, reads body)</h3>
 <pre><code>(:- (MyDs/stripe-webhook! Exec Result)
     (get Exec "body" Body)
@@ -75,3 +85,4 @@
 
 <h2>Security note</h2>
 <p>HTTP hooks have no authentication. The UUID provides security through obscurity — do not expose hook URLs in client-side code. Rate limiting and authentication are future work.</p>
+<p>A handler runs with no caller credential: the request carries none, so terms that check the caller's permission on a page (for example <code>Qo.Public.OqlApi.Page.Bl.PushCon/get-by-name</code>) fail inside it. A component's handler reads its own page's settings with <code>Qo.Page.PageProp/prop-data</code>, and its push connectors with <code>Qo.Page.Bl/page-block</code> and <code>Qo.PushCon/push-connector</code>. Check everything the request claims (for an OAuth callback, a one-time <code>state</code>) before acting on it. Worked example: <code>Public/OAuth</code>.</p>
