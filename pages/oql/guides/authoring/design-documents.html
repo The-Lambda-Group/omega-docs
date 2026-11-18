@@ -1,0 +1,109 @@
+<!-- omega-visibility: public -->
+<h1>Your First Design Document</h1>
+<p hidden data-parent="README"></p>
+
+<h2>Visibility</h2>
+<p>Owner: omega | Workspace: OmegaAI | Visibility: Public</p>
+
+<h2>What you build</h2>
+<p>A Design Document block keeps one database page of results current from another database page. You give it an <strong>Input Table</strong> (the database page it reads), an <strong>Output Page</strong> (the database page it writes), a <strong>Service Account</strong> (the account its methods run as) and a <strong>Map method</strong>, and optionally a <strong>Reduce method</strong>. Whenever a row of the Input Table changes, the engine runs the methods and keeps one Output Page row per key. This guide counts orders per group: the orders A1, A2 (group A) and B1 (group B) give the Output Page rows <code>["A"]</code> = <code>2</code> and <code>["B"]</code> = <code>1</code>. Every command below is the <code>qo</code> CLI in your selected workspace, and every reference is a path, never an id. The same verbs are MCP tools named <code>block_design_document_create</code>, <code>_status</code>, <code>_get</code>, <code>_update</code>, <code>_resume</code>, <code>_rebuild</code> and <code>_delete</code>.</p>
+
+<h2>1. The Input Table</h2>
+<pre><code class="language-bash">qo add-page "" "Orders" --database
+qo page set-columns "Orders" '["Name","Group","Amount"]'
+qo page set-primary-key "Orders" '["Name"]'
+qo write "Orders" --data '{"header":["Name","Group","Amount"],"rows":[["A1","A","1"],["A2","A","2"],["B1","B","3"]]}'
+</code></pre>
+
+<h2>2. The Output Page</h2>
+<p>You make the Output Page; the block never creates, owns or changes its columns. It must have exactly the text columns <code>Key</code> (the primary key) and <code>Value</code>.</p>
+<pre><code class="language-bash">qo add-page "" "Orders per group" --database
+qo page set-columns "Orders per group" '["Key","Value"]'
+qo page set-primary-key "Orders per group" '["Key"]'
+</code></pre>
+
+<h2>3. The page that holds the block, and its Service Account</h2>
+<p>The Map and Reduce methods run as this account, never as you. To name an account in a Design Document you need read and write permission on it (its owner, or an Admin of the workspace).</p>
+<pre><code class="language-bash">qo add-page "" "Reports"
+qo block service-account create "Reports" counter
+</code></pre>
+
+<h2>4. The Map and Reduce methods</h2>
+<p>Methods are OQL clauses of a component. The Map method receives one row and binds <code>Result</code> to <code>[Key Value]</code>: here every order emits its group with the value 1 (several solutions would emit several rows). The Reduce method receives the values of one key and sums them; it must be associative and commutative (a sum, count, minimum or maximum), because the engine combines partial results in any order.</p>
+<pre><code class="language-bash">mkdir -p count-methods/Notes count-methods/protocols count-methods/implementations
+cat &gt; count-methods/.page.json &lt;&lt;'EOF'
+{"name":"count-methods"}
+EOF
+cat &gt; count-methods/component.json &lt;&lt;'EOF'
+{"name":"Count Methods","type":"omega/query-omega/component/Component"}
+EOF
+cat &gt; count-methods/Notes/.page.json &lt;&lt;'EOF'
+{"name":"Notes"}
+EOF
+cat &gt; count-methods/protocols/CountMethods.json &lt;&lt;'EOF'
+{"functions":[{"name":"map-group","args":["self","row"]},{"name":"sum","args":["self","input"]}]}
+EOF
+cat &gt; count-methods/implementations/CountMethods.json &lt;&lt;'EOF'
+{"protocol":{"name":"CountMethods","external":false},"component":{"name":"Count Methods","external":false},"name":"CountMethods"}
+EOF
+cat &gt; count-methods/implementations/CountMethods.oql &lt;&lt;'EOF'
+(datastore Qo.Public.OqlApi.Impl "omega/query-omega/public/oql-api/implementation")
+
+(:- (MapGroup Exec Result)
+    (get Exec "args" Args)
+    (get Args 0 Row)
+    (get Row "values" Vs)
+    (get Vs "Group" G)
+    (= Result [G 1]))
+
+(:- (Sum Exec Result)
+    (get Exec "args" Args)
+    (get Args 0 Input)
+    (get Input "values" Vs)
+    (get Vs I V)
+    (with-unique-by [I] (fold 0 V + Result)))
+
+(= Clauses {"map-group" {"2" MapGroup} "sum" {"2" Sum}})
+(get $$ARG$$ "implementation-id" ImplId)
+(Qo.Public.OqlApi.Impl/set-implementation-clauses ImplId Clauses _)
+(return ["ok"])
+EOF
+qo add-page "" "Libraries"
+qo add-page "Libraries" "count-methods"
+qo push --source count-methods --library-page-path "Libraries/count-methods"
+</code></pre>
+
+<h2>5. Create the Design Document</h2>
+<p>The block is named <code>Reports@orders-per-group</code>: the page that holds it, then its name.</p>
+<pre><code class="language-bash">qo block design-document create "Reports@orders-per-group" \
+  --input "Orders" --output "Orders per group" --service-account "Reports@counter" \
+  --map-page "Libraries/count-methods" --map-protocol CountMethods --map-method map-group \
+  --reduce-page "Libraries/count-methods" --reduce-protocol CountMethods --reduce-method sum
+</code></pre>
+
+<h2>6. Wait for it, then read the result</h2>
+<p>The status is <code>running</code> while the engine catches up, <code>in sync</code> when it is current, <code>retrying</code>, or <code>failed</code> with your method's error message. The Output Page rows are written a moment after the status turns <code>in sync</code>: if a row is missing, read again.</p>
+<pre><code class="language-bash">until qo block design-document status "Reports@orders-per-group" --json | grep -q '"in sync"'; do sleep 2; done
+qo query "Orders per group" --limit 100
+</code></pre>
+<p>Expect two rows: Key <code>["A"]</code> with Value <code>2</code>, and Key <code>["B"]</code> with Value <code>1</code>. A Key is the JSON text of the key your Map emitted.</p>
+
+<h2>7. Change the input, watch the output follow</h2>
+<pre><code class="language-bash">qo write "Orders" --data '{"header":["Name","Group","Amount"],"rows":[["B2","B","4"]]}'
+qo query "Orders per group" --limit 100
+</code></pre>
+<p>Group B now has two orders, so Key <code>["B"]</code> reads <code>2</code> once the engine has caught up.</p>
+
+<h2>8. Update merges</h2>
+<p><code>update</code> changes only the fields you name and keeps the others. A method is named by all three of its flags. An <code>update</code> that names no field is refused. A Reduce cannot be removed by an update: delete the block and create it again without one.</p>
+<pre><code class="language-bash">qo block design-document update "Reports@orders-per-group" \
+  --reduce-page "Libraries/count-methods" --reduce-protocol CountMethods --reduce-method sum
+qo block design-document get "Reports@orders-per-group"
+</code></pre>
+<p>The document keeps its Input Table, Output Page, Service Account and Map method; the update replays it, so the Output Page stays current.</p>
+
+<h2>9. Resume, rebuild, delete</h2>
+<pre><code class="language-bash">qo block design-document rebuild "Reports@orders-per-group"
+qo block design-document delete "Reports@orders-per-group"
+</code></pre>
+<p><code>resume</code> runs a <code>failed</code> document again after you fix its method; <code>rebuild</code> replays it from the start. <code>delete</code> stops the document and changes nothing else: the Output Page keeps its rows, and the Input Table, the Output Page and the Service Account stay. While a document refers to a page or an account, deleting that page or account, or changing the page's columns, is refused; delete the block first.</p>
